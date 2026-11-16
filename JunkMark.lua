@@ -138,6 +138,25 @@ local function Print(message)
 	print(CHAT_PREFIX .. message);
 end
 
+-- A short trace of what the queue button and the mark key did, kept in the saved data
+-- (the last TRACE_LINES lines). It is how "I clicked and X happened" gets checked
+-- against what the addon actually saw; nothing reads it back.
+local TRACE_LINES = 80;
+local function Trace(...)
+	if not db then
+		return;
+	end
+	local parts = { date("%H:%M:%S") };
+	for i = 1, select("#", ...) do
+		parts[#parts + 1] = tostring((select(i, ...)));
+	end
+	db.trace = db.trace or {};
+	db.trace[#db.trace + 1] = table.concat(parts, " ");
+	while #db.trace > TRACE_LINES do
+		table.remove(db.trace, 1);
+	end
+end
+
 local function Plural(count)
 	return count == 1 and "" or "s";
 end
@@ -740,6 +759,8 @@ function CycleSlot(bag, slot)
 		nextKind = hasAction and KIND_JUNK or KIND_FAVORITE;
 	end
 
+	Trace("mark key: item", info.itemID, "->", nextKind or "none", sellOnly and "(vendor)" or "",
+		hasAction and "[can be queued]" or "[no profession use]", canSell and "" or "[no sell value]");
 	SetMark(guid, nextKind, sellOnly);
 	PlaySound(nextKind and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF);
 	OnMarksChanged();
@@ -1105,6 +1126,7 @@ local function SkipQueueHead()
 		return;
 	end
 	local info = C_Container.GetContainerItemInfo(head.bag, head.slot);
+	Trace("skip (right-click on the queue icon): item", info and info.itemID or "?", info and not info.hasNoValue and "-> vendor pile" or "-> unmarked");
 	if info and not info.hasNoValue then
 		mark.sellOnly = true;
 	else
@@ -1169,10 +1191,16 @@ end
 
 local function OnErrorMessage(errorType, message)
 	local attempt = lastAttempt;
-	if not attempt or not db or GetTime() - attempt.time > REFUSAL_WINDOW_SECONDS then
+	if not attempt or not db then
 		return;
 	end
+	local age = GetTime() - attempt.time;
+	if age > REFUSAL_WINDOW_SECONDS then
+		return;
+	end
+	Trace("error", errorType, message, string.format("%.2fs after the click", age));
 	if GetSlotGUID(attempt.bag, attempt.slot) ~= attempt.guid then
+		Trace("  ignored: the item tried is no longer in that slot");
 		return;
 	end
 	local info = C_Container.GetContainerItemInfo(attempt.bag, attempt.slot);
@@ -1194,8 +1222,10 @@ local function OnErrorMessage(errorType, message)
 	};
 
 	if not info.itemID or not IsFinalRefusal(attempt.action, message) then
+		Trace("  not a final refusal: nothing learned");
 		return;
 	end
+	Trace("  learned: item", info.itemID, "refused for", attempt.action.label);
 	lastAttempt = nil;
 	db.refused = db.refused or {};
 	db.refused[attempt.action.spellID] = db.refused[attempt.action.spellID] or {};
@@ -1275,7 +1305,10 @@ local function CreateQueuePanel()
 		GameTooltip:Show();
 	end);
 	processButton:SetScript("OnLeave", GameTooltip_Hide);
-	processButton:SetScript("PostClick", function(_, mouseButton, down)
+	processButton:SetScript("PostClick", function(self, mouseButton, down)
+		local head = self.head;
+		local headInfo = head and C_Container.GetContainerItemInfo(head.bag, head.slot);
+		Trace("click", mouseButton, down and "down" or "up", "head", headInfo and headInfo.itemID or "none", InCombatLockdown() and "in-combat" or "");
 		if mouseButton == "RightButton" and not down and not InCombatLockdown() then
 			SkipQueueHead();
 		elseif mouseButton == "LeftButton" then
