@@ -66,10 +66,10 @@ A **Sell Junk (N)** button hangs under the bottom-right corner of the vendor win
 
 If your character knows an ability that uses an item up, junk it applies to can be queued for that ability instead of being sold: press Space a second time on the item. Currently that is Disenchant, for uncommon-to-epic weapons and armor, except items whose tooltip says they cannot be disenchanted. Queued junk is tinted purple with the ability's icon. Gear a vendor will not buy is queued on the first press, since nothing else can be done with it.
 
-- A small movable panel shows the next item and how many are queued. Click the icon to process that item.
+- A small movable panel shows the next item and how many are queued. Click the icon, with either mouse button, to process that item.
 - The game requires a real click or key press for every spell cast, so the queue cannot run by itself.
 - Items are processed in the order you marked them.
-- Right-click the icon to send that item back to the vendor pile.
+- Shift-right-click the icon to send that item back to the vendor pile instead.
 - Shift-click **Sell Junk** to sell the queued items too.
 - The queue pauses during combat.
 - Some gear cannot be disenchanted and the game does not say so until you try. When the game refuses a queued item outright, JunkMark removes its mark, tells you, and stops offering to disenchant that kind of item.

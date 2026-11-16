@@ -205,7 +205,7 @@ check("gray weapon junk goes to the vendor pile", btn(0, 1):state() == "sell")
 check("green armor junk is routed to disenchant", btn(0, 3):state() == "queue" and btn(0, 3).textures[3].tex == "spellicon:13262")
 check("unsellable gear can still be junk, for disenchanting", kind("questring") == "junk" and btn(1, 1):state() == "queue")
 P, B = JunkMarkQueuePanel, JunkMarkProcessButton
-check("queue is first-marked first (migrated staff, then helm, then ring)", B.head.guid == "bluestaff" and B.attrs.spell1 == 13262 and B.attrs["target-bag1"] == 0 and B.attrs["target-slot1"] == 4 and P.countText.text == "3 items queued" and P.title.text == "Disenchant")
+check("queue is first-marked first (migrated staff, then helm, then ring)", B.head.guid == "bluestaff" and B.attrs.spell == 13262 and B.attrs["target-bag"] == 0 and B.attrs["target-slot"] == 4 and P.countText.text == "3 items queued" and P.title.text == "Disenchant")
 
 -- favorites at the vendor
 -- gear a vendor will also buy steps through both kinds of junk before favorite
@@ -226,9 +226,12 @@ JunkMarkSellButton.scripts.OnClick(JunkMarkSellButton); pump(4)
 check("Sell Junk sells vendor junk only", money == 200 and not bags[0][1] and not bags[0][2] and bags[0][3] and bags[0][4] and bags[1][1] and bags[1][3])
 check("button stays usable for Shift-click while items are held", JunkMarkSellButton.text == "Sell Junk (0)" and JunkMarkSellButton.enabled)
 
--- right-click the queue head: send it to the vendor instead
-B.scripts.PostClick(B, "RightButton", true); check("right-click acts on release only", B.head.guid == "bluestaff")
-B.scripts.PostClick(B, "RightButton", false)
+-- either mouse button processes the head; only Shift-right-click sends it to the vendor instead
+check("the queue button casts for any button, and Shift-right-click is switched off for the cast", B.attrs.type == "spell" and B.attrs.type1 == nil and B.attrs["shift-type2"] == "" and B.attrs["shift-target-bag2"] == "" and B.attrs["shift-target-slot2"] == "")
+B.scripts.PostClick(B, "RightButton", true); B.scripts.PostClick(B, "RightButton", false)
+check("a plain right-click does not send the item to the vendor", B.head.guid == "bluestaff" and btn(0, 4):state() == "queue" and JunkMarkSellButton.text == "Sell Junk (0)")
+shift = true; B.scripts.PostClick(B, "RightButton", true); check("Shift-right-click acts on release only", B.head.guid == "bluestaff")
+B.scripts.PostClick(B, "RightButton", false); shift = false
 check("skipped head moves to the vendor pile and stays junk", kind("bluestaff") == "junk" and btn(0, 4):state() == "sell" and B.head.guid == "greenhelm" and JunkMarkSellButton.text == "Sell Junk (1)")
 
 -- hovering a favorite at the vendor goes through the blocker; ordering of enter/leave must not matter
@@ -242,8 +245,8 @@ check("re-favorited at the vendor: blocker returns immediately", kind("heirloom"
 shift = true; JunkMarkSellButton.scripts.OnClick(JunkMarkSellButton); pump(4); shift = false
 check("Shift-click sells queued junk as well", money == 200 + 900 + 300 and not bags[0][3] and not bags[0][4])
 check("unsellable ring stays queued; favorite untouched", bags[1][1] and B.head.guid == "questring" and bags[1][3] and kind("heirloom") == "favorite")
-local skippedAt = #out + 1; B.scripts.PostClick(B, "RightButton", false)
-check("skipping an unsellable item unmarks it and empties the queue", kind("questring") == nil and not P.shown and B.attrs.type1 == nil)
+local skippedAt = #out + 1; shift = true; B.scripts.PostClick(B, "RightButton", false); shift = false
+check("skipping an unsellable item unmarks it and empties the queue", kind("questring") == nil and not P.shown and B.attrs.type == nil)
 check("...and says so, rather than letting the mark vanish silently", table.concat(out, "\n", skippedAt):find("can't be sold to a vendor either, so its mark was removed.", 1, true) ~= nil)
 merchantOpen = false; fire("MERCHANT_CLOSED")
 check("blocker lifted when the vendor closes", not btn(1, 3):blocked())
@@ -252,19 +255,19 @@ check("blocker lifted when the vendor closes", not btn(1, 3):blocked())
 put(0, 5, "greenboots", 200, { quality = 2, class = 4 }); put(0, 6, "greenbelt", 150, { quality = 2, class = 4 })
 press(0, 5, 2)
 hover(btn(0, 6)); fire("PLAYER_REGEN_DISABLED"); inCombat = true
-check("entering combat releases Space and disarms the queue button", next(override) == nil and B.attrs.type1 == nil)
+check("entering combat releases Space and disarms the queue button", next(override) == nil and B.attrs.type == nil)
 check("Space does nothing on hover during combat", not space())
 unhover(btn(0, 6)); hover(btn(0, 5)); unhover(btn(0, 5)); hover(btn(0, 6))
 inCombat = false; fire("PLAYER_REGEN_ENABLED")
-check("after combat Space works again on the item still hovered", override.SPACE == "JUNKMARK_TOGGLE" and B.attrs.type1 == "spell" and B.head.guid == "greenboots")
+check("after combat Space works again on the item still hovered", override.SPACE == "JUNKMARK_TOGGLE" and B.attrs.type == "spell" and B.head.guid == "greenboots")
 space(); space(); unhover(btn(0, 6))
 check("queue grows in mark order", kind("greenbelt") == "junk" and B.head.guid == "greenboots" and P.countText.text == "2 items queued")
 bags[0][5] = nil; fire("BAG_UPDATE_DELAYED")
-check("queue advances after a disenchant", B.head.guid == "greenbelt" and B.attrs["target-slot1"] == 6)
+check("queue advances after a disenchant", B.head.guid == "greenbelt" and B.attrs["target-slot"] == 6)
 
 -- not an enchanter: all junk is vendor junk
 knowsDE = false; fire("SPELLS_CHANGED")
-check("without Disenchant the same junk goes to the vendor pile", btn(0, 6):state() == "sell" and not P.shown and B.attrs.type1 == nil)
+check("without Disenchant the same junk goes to the vendor pile", btn(0, 6):state() == "sell" and not P.shown and B.attrs.type == nil)
 put(0, 7, "greencloak", 120, { quality = 2, class = 4 }); fire("BAG_UPDATE_DELAYED")
 press(0, 7); check("without Disenchant, gear is vendor junk", kind("greencloak") == "junk" and btn(0, 7):state() == "sell")
 press(0, 7); check("...and has no second junk step: junk -> favorite", kind("greencloak") == "favorite")
@@ -623,11 +626,16 @@ local trace = table.concat(JunkMarkDB.trace, "\n")
 check("the trace shows the click, the game's answer and what was learned", trace:find("click LeftButton down head 9001", 1, true) ~= nil and trace:find("error 414 That item is not a valid target.", 1, true) ~= nil and trace:find("learned: item 9001 refused for Disenchant", 1, true) ~= nil)
 check("...and the mark key's steps, with why", trace:find("mark key: item 9001 -> junk  [can be queued] [no sell value]", 1, true) ~= nil and #JunkMarkDB.trace <= 80)
 check("...and the name of the game string that holds the text is recorded", #JunkMarkDB.lastRefusal.globals == 1 and JunkMarkDB.lastRefusal.globals[1] == "A_GAME_STRING_NAME" and JunkMarkDB.lastRefusal.errorType == 414 and JunkMarkDB.lastRefusal.lookupError == nil)
-check("...as is how many times the queue button has been left-clicked", JunkMarkDB.attempts == 4)
+check("...as is how many times the queue button has been clicked to process an item", JunkMarkDB.attempts == 4)
 press(0, 4); check("refused gear nobody buys now skips junk: none -> favorite", kind("moonstalker") == "favorite")
 press(0, 4); SlashCmdList.JUNKMARK("forget"); press(0, 4)
 check("'/jm forget' lets a refused item be queued again", JunkMarkDB.refused == nil and kind("moonstalker") == "junk" and B.head.guid == "moonstalker")
-B.scripts.PostClick(B, "LeftButton", true); fire("UI_ERROR_MESSAGE", 414, "That item is not a valid target."); press(0, 3, 2)
+shift = true; B.scripts.PostClick(B, "RightButton", false); shift = false
+check("Shift-right-click on gear nobody buys unmarks it and teaches nothing", kind("moonstalker") == nil and JunkMarkDB.refused == nil)
+press(0, 4); B.scripts.PostClick(B, "RightButton", true); fire("UI_ERROR_MESSAGE", 414, "That item is not a valid target.")
+check("a right-click is an attempt like a left-click: the game's refusal after it is learned", kind("moonstalker") == nil and JunkMarkDB.refused[13262][9001] == true and JunkMarkDB.attempts == 5)
+check("...and the trace names the buttons", table.concat(JunkMarkDB.trace, "\n"):find("click Shift-RightButton up head 9001", 1, true) ~= nil and table.concat(JunkMarkDB.trace, "\n"):find("click RightButton down head 9001", 1, true) ~= nil)
+press(0, 3, 2)
 A_GAME_STRING_NAME, another_value = nil, nil
 
 -- /jm debug writes what the game reports about each junk-marked item into the saved data

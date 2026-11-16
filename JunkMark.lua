@@ -1106,16 +1106,28 @@ end
 -- Points the secure button at a bag slot, or disarms it when head is nil.
 -- Secure attributes can only change out of combat; callers check InCombatLockdown.
 --
--- Every attribute carries the "1" suffix, which limits it to the left button. The
--- secure click handler applies an unsuffixed target-bag/target-slot after ANY click
--- while an item-targeting spell is on the cursor, so without the suffix a right-click
--- ("sell it instead") made with Disenchant already on the cursor would use it on the item.
+-- The attributes carry no button suffix, so either mouse button processes the item.
+-- Right-click is how an item is used in the bags, and players reach for it here too;
+-- when it meant "sell it instead", a right-click meant to disenchant quietly sent the
+-- item to the vendor pile.
+--
+-- "Sell it instead" is Shift-right-click, handled in PostClick. For the secure handler
+-- that combination is switched off with the empty string, the value Blizzard's code
+-- reads as "no action" (ATTRIBUTE_NOOP, Blizzard_FrameXML/SecureTemplates.lua). The
+-- target is switched off as well as the type: after any click the handler uses the
+-- button's target-bag/target-slot if an item-targeting spell is already on the cursor,
+-- and a Shift-right-click must not disenchant the item it is meant to spare.
+local NO_ACTION = "";
 local function AimProcessButton(head)
 	processButton.head = head;
-	processButton:SetAttribute("type1", head and "spell" or nil);
-	processButton:SetAttribute("spell1", head and head.action.spellID or nil);
-	processButton:SetAttribute("target-bag1", head and head.bag or nil);
-	processButton:SetAttribute("target-slot1", head and head.slot or nil);
+	processButton:SetAttribute("type", head and "spell" or nil);
+	processButton:SetAttribute("spell", head and head.action.spellID or nil);
+	processButton:SetAttribute("target-bag", head and head.bag or nil);
+	processButton:SetAttribute("target-slot", head and head.slot or nil);
+	processButton:SetAttribute("shift-type2", NO_ACTION);
+	processButton:SetAttribute("shift-target-bag2", NO_ACTION);
+	processButton:SetAttribute("shift-target-slot2", NO_ACTION);
+	processButton:SetAttribute("shift-target-item2", NO_ACTION);
 end
 
 -- Sends the item at the head of the queue to the vendor pile instead.
@@ -1126,7 +1138,7 @@ local function SkipQueueHead()
 		return;
 	end
 	local info = C_Container.GetContainerItemInfo(head.bag, head.slot);
-	Trace("skip (right-click on the queue icon): item", info and info.itemID or "?", info and not info.hasNoValue and "-> vendor pile" or "-> unmarked");
+	Trace("sell instead (shift-right-click on the queue icon): item", info and info.itemID or "?", info and not info.hasNoValue and "-> vendor pile" or "-> unmarked");
 	if info and not info.hasNoValue then
 		mark.sellOnly = true;
 	else
@@ -1300,18 +1312,21 @@ local function CreateQueuePanel()
 		GameTooltip:SetOwner(self, "ANCHOR_RIGHT");
 		GameTooltip:SetBagItem(self.head.bag, self.head.slot);
 		GameTooltip:AddLine(" ");
-		GameTooltip:AddLine("Click: " .. self.head.action.label:lower() .. " this item", 0.4, 1, 0.4);
-		GameTooltip:AddLine("Right-click: sell it to a vendor instead", 0.4, 1, 0.4);
+		GameTooltip:AddLine("Click (either button): " .. self.head.action.label:lower() .. " this item", 0.4, 1, 0.4);
+		GameTooltip:AddLine("Shift-right-click: sell it to a vendor instead", 0.4, 1, 0.4);
 		GameTooltip:Show();
 	end);
 	processButton:SetScript("OnLeave", GameTooltip_Hide);
 	processButton:SetScript("PostClick", function(self, mouseButton, down)
 		local head = self.head;
 		local headInfo = head and C_Container.GetContainerItemInfo(head.bag, head.slot);
-		Trace("click", mouseButton, down and "down" or "up", "head", headInfo and headInfo.itemID or "none", InCombatLockdown() and "in-combat" or "");
-		if mouseButton == "RightButton" and not down and not InCombatLockdown() then
-			SkipQueueHead();
-		elseif mouseButton == "LeftButton" then
+		local sellInstead = mouseButton == "RightButton" and IsShiftKeyDown();
+		Trace("click", sellInstead and "Shift-RightButton" or mouseButton, down and "down" or "up", "head", headInfo and headInfo.itemID or "none", InCombatLockdown() and "in-combat" or "");
+		if sellInstead then
+			if not down and not InCombatLockdown() then
+				SkipQueueHead();
+			end
+		elseif mouseButton == "LeftButton" or mouseButton == "RightButton" then
 			NoteAttempt();
 		end
 	end);
