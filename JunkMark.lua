@@ -274,6 +274,26 @@ end
 -- Bag overlays
 --------------------------------------------------------------------------------
 
+-- Where the mark icon sits on an item button: db.corner, changed with /jm corner.
+-- It is a setting because bag addons put things of their own in the corners; both
+-- Baganator and EllesmereUIBags write the item level top-left, where the icon used to be.
+local CORNERS = {
+	topleft = { "TOPLEFT", 2, -2 },
+	topright = { "TOPRIGHT", -2, -2 },
+	bottomleft = { "BOTTOMLEFT", 2, 2 },
+	bottomright = { "BOTTOMRIGHT", -2, 2 },
+};
+local CORNER_NAMES = "topleft, topright, bottomleft, bottomright";
+local DEFAULT_CORNER = "bottomright";
+
+local function AnchorMarkIcons(overlay)
+	local corner = CORNERS[db.corner] or CORNERS[DEFAULT_CORNER];
+	for _, icon in ipairs({ overlay.coin, overlay.action, overlay.star }) do
+		icon:ClearAllPoints();
+		icon:SetPoint(corner[1], corner[2], corner[3]);
+	end
+end
+
 local function CreateOverlay(button)
 	local overlay = {};
 
@@ -282,21 +302,23 @@ local function CreateOverlay(button)
 	overlay.shade = button:CreateTexture(nil, "ARTWORK", nil, -8);
 	overlay.shade:SetAllPoints(button);
 
+	-- The mark icons are in ARTWORK as well, above the shade. The stack count is text
+	-- in the same layer and text draws over textures, so with the icon in the count's
+	-- corner (bottom right) the number stays readable on top of it.
+
 	-- Junk bound for a vendor: the coin the default UI shows on gray items.
-	overlay.coin = button:CreateTexture(nil, "OVERLAY", nil, 7);
+	overlay.coin = button:CreateTexture(nil, "ARTWORK", nil, 1);
 	overlay.coin:SetAtlas("bags-junkcoin", true);
-	overlay.coin:SetPoint("TOPLEFT", 1, 0);
 
 	-- Junk bound for a profession: that ability's icon.
-	overlay.action = button:CreateTexture(nil, "OVERLAY", nil, 7);
+	overlay.action = button:CreateTexture(nil, "ARTWORK", nil, 1);
 	overlay.action:SetSize(16, 16);
-	overlay.action:SetPoint("TOPLEFT", 1, -1);
 
-	overlay.star = button:CreateTexture(nil, "OVERLAY", nil, 7);
+	overlay.star = button:CreateTexture(nil, "ARTWORK", nil, 1);
 	overlay.star:SetAtlas("auctionhouse-icon-favorite");
 	overlay.star:SetSize(16, 16);
-	overlay.star:SetPoint("TOPLEFT", 1, -1);
 
+	AnchorMarkIcons(overlay);
 	overlays[button] = overlay;
 	return overlay;
 end
@@ -1117,6 +1139,17 @@ SlashCmdList["JUNKMARK"] = function(message)
 		Print("Auto-sell when a vendor opens is now " .. (db.autoSell and "|cff40ff40on|r" or "|cffff4040off|r") .. ".");
 	elseif command == "professions" or command == "prof" then
 		PrintProfessions();
+	elseif command:match("^corner") then
+		local corner = command:match("^corner%s+(%a+)$");
+		if corner and CORNERS[corner] then
+			db.corner = corner;
+			for _, overlay in pairs(overlays) do
+				AnchorMarkIcons(overlay);
+			end
+			Print("Mark icons now sit in the " .. corner .. " corner.");
+		else
+			Print(string.format("Mark icons sit in the %s corner. Change it with /jm corner <%s>.", db.corner or DEFAULT_CORNER, CORNER_NAMES));
+		end
 	else
 		Print(string.format("Hover a bag item and press %s to cycle its mark: junk, favorite, none.", HOVER_KEY_NAME));
 		print("  Junk your professions can use is queued for them; the rest is sold at a vendor.");
@@ -1124,6 +1157,7 @@ SlashCmdList["JUNKMARK"] = function(message)
 		print("  /jm sell        - sell junk (at a vendor); '/jm sell all' includes queued items");
 		print("  /jm auto        - toggle selling automatically when a vendor opens");
 		print("  /jm professions - show your professions and how junk is routed");
+		print("  /jm corner      - show or set which corner of an item the mark icon sits in");
 		print("  /jm clear       - remove every mark");
 	end
 end

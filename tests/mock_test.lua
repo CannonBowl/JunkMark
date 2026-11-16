@@ -89,6 +89,8 @@ local function widget()
   function w:CreateTexture() return widget() end
   function w:CreateFontString() return widget() end
   function w:GetPoint() return "CENTER", nil, "CENTER", 1, 2 end
+  function w:ClearAllPoints() self.point = nil end
+  function w:SetPoint(...) self.point = { ... } end
   return setmetatable(w, { __index = function() return noop end })
 end
 local eventHandler, onUpdate
@@ -389,6 +391,17 @@ check("the vanished stack's leftover mark is cleaned up, and nothing is offered 
 merchantOpen = false; fire("MERCHANT_CLOSED")
 relog()
 check("final state survives login: one favorite stack, nothing else marked", kind("cloth-B") == "favorite" and kind("cloth-A") == nil and kind("sword-B") == nil and btn(0, 3):state() == "favorite" and btn(0, 4):state() == "none" and btn(0, 1):state() == "none")
+
+-- Which corner the mark icon sits in. Textures are created in order: shade, coin, action, star.
+local function corner(b, i) local p = b.textures[i] and b.textures[i].point; return p and p[1] end
+check("mark icons sit in the bottom-right corner by default", corner(btn(0, 3), 2) == "BOTTOMRIGHT" and corner(btn(0, 3), 3) == "BOTTOMRIGHT" and corner(btn(0, 3), 4) == "BOTTOMRIGHT")
+SlashCmdList.JUNKMARK("corner topright")
+check("'/jm corner' moves icons already drawn, and is saved", corner(btn(0, 3), 4) == "TOPRIGHT" and corner(btn(0, 3), 2) == "TOPRIGHT" and JunkMarkDB.corner == "topright")
+press(0, 1); check("...and a newly marked item uses it", btn(0, 1):state() == "sell" and corner(btn(0, 1), 2) == "TOPRIGHT"); press(0, 1, 2)
+local saidAt = #out + 1; SlashCmdList.JUNKMARK("corner middle"); SlashCmdList.JUNKMARK("corner")
+check("an unknown corner changes nothing and the choices are listed", JunkMarkDB.corner == "topright" and corner(btn(0, 3), 4) == "TOPRIGHT" and table.concat(out, "\n", saidAt):find("topright corner. Change it with /jm corner <topleft, topright, bottomleft, bottomright>", 1, true) ~= nil)
+relog(); check("the corner survives login", JunkMarkDB.corner == "topright" and corner(btn(0, 3), 4) == "TOPRIGHT")
+SlashCmdList.JUNKMARK("corner bottomright")
 
 -- Another bag addon (Bagnon, Baganator, EllesmereUIBags): its own window, with item
 -- buttons made from the same Blizzard template. These frames are plain tables with only

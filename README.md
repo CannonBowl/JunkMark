@@ -48,6 +48,7 @@ Marking also works in bag addons that draw their own bag window, such as Bagnon,
 
 - JunkMark notices such a window the first time your cursor rests on one of its items. Until then, in a fresh session, that window shows no marks; from then on it is kept up to date.
 - Only bag slots can be marked, not bank slots.
+- Bag addons put things of their own in the corners of an item (Baganator and EllesmereUIBags write the item level top-left). The mark icon sits bottom-right by default, under the stack count; if that corner is taken in your layout, move it with `/jm corner`.
 
 ## Junk
 
@@ -113,6 +114,11 @@ Two bindings are listed under Options > Keybindings > AddOns:
 
 # Show your professions, their abilities, and how junk is routed.
 /jm professions
+
+# Show which corner of an item the mark icon sits in, or set it:
+# topleft, topright, bottomleft, bottomright. Bottom right by default.
+/jm corner
+/jm corner topright
 
 # Remove every mark, favorites included.
 /jm clear
