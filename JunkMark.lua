@@ -107,12 +107,15 @@ local ACTIONS = {
 		tint = { 0.35, 0.1, 0.55 },
 		IsEligible = IsDisenchantable,
 		-- Names of the game's own strings, so the match holds in every language.
-		finalRefusals = { "SPELL_FAILED_CANT_BE_DISENCHANTED" },
-		-- What this client actually answered for the Enchanted Moonstalker Cloak
-		-- (2026-11-16, enUS): a generic "can't target that item", error type 414. Its
-		-- string's name is not known yet, so it is matched as English text for now;
-		-- lastRefusal.globals records the name the next time it is seen.
-		finalRefusalTexts = { "That item is not a valid target." },
+		--
+		-- The middle one is what this client answers for gear it will not disenchant:
+		-- "That item is not a valid target.", error type 414, seen in the game on
+		-- 2026-11-16 for the Enchanted Moonstalker Cloak. Two of the client's strings
+		-- hold exactly that text in English (found by lastRefusal.globals); which of the
+		-- two the game sends is not known, so both are listed in case a translation
+		-- tells them apart. The first is the specific message other versions of the
+		-- game use, kept in case this one ever sends it.
+		finalRefusals = { "SPELL_FAILED_CANT_BE_DISENCHANTED", "ERR_INVALID_ITEM_TARGET", "SPELL_FAILED_WRONG_ARTIFACT_EQUIPPED" },
 	},
 };
 
@@ -1177,11 +1180,6 @@ end
 local function IsFinalRefusal(action, message)
 	for _, name in ipairs(action.finalRefusals or {}) do
 		if _G[name] ~= nil and _G[name] == message then
-			return true;
-		end
-	end
-	for _, text in ipairs(action.finalRefusalTexts or {}) do
-		if text == message then
 			return true;
 		end
 	end

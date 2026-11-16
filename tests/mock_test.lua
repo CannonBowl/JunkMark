@@ -616,7 +616,8 @@ press(0, 1); press(0, 1); press(0, 1)
 check("what was learned survives login", JunkMarkDB.refused[13262][5387] == true and kind("cloak-A") == "favorite" and B.head.guid == "belt")
 
 -- What this client really says for such an item is a generic message whose string name is not known yet.
-A_GAME_STRING_NAME, another_value = "That item is not a valid target.", "That item is not a valid target."
+-- two of the client's strings hold this text; a third global with the same value is not a game string
+ERR_INVALID_ITEM_TARGET, SPELL_FAILED_WRONG_ARTIFACT_EQUIPPED, another_value = "That item is not a valid target.", "That item is not a valid target.", "That item is not a valid target."
 put(0, 4, "moonstalker", 0, { quality = 2, class = 4, noValue = true, id = 9001 }); ContainerFrameCombinedBags:UpdateItems()
 press(0, 3, 2); press(0, 4)
 check("(unsellable gear is queued on the first press, and is now next)", B.head.guid == "moonstalker" and kind("belt") == nil)
@@ -625,7 +626,7 @@ check("'not a valid target' after an attempt is final too", kind("moonstalker") 
 local trace = table.concat(JunkMarkDB.trace, "\n")
 check("the trace shows the click, the game's answer and what was learned", trace:find("click LeftButton down head 9001", 1, true) ~= nil and trace:find("error 414 That item is not a valid target.", 1, true) ~= nil and trace:find("learned: item 9001 refused for Disenchant", 1, true) ~= nil)
 check("...and the mark key's steps, with why", trace:find("mark key: item 9001 -> junk  [can be queued] [no sell value]", 1, true) ~= nil and #JunkMarkDB.trace <= 80)
-check("...and the name of the game string that holds the text is recorded", #JunkMarkDB.lastRefusal.globals == 1 and JunkMarkDB.lastRefusal.globals[1] == "A_GAME_STRING_NAME" and JunkMarkDB.lastRefusal.errorType == 414 and JunkMarkDB.lastRefusal.lookupError == nil)
+check("...and the name of the game string that holds the text is recorded", #JunkMarkDB.lastRefusal.globals == 2 and JunkMarkDB.lastRefusal.globals[1] == "ERR_INVALID_ITEM_TARGET" and JunkMarkDB.lastRefusal.globals[2] == "SPELL_FAILED_WRONG_ARTIFACT_EQUIPPED" and JunkMarkDB.lastRefusal.errorType == 414 and JunkMarkDB.lastRefusal.lookupError == nil)
 check("...as is how many times the queue button has been clicked to process an item", JunkMarkDB.attempts == 4)
 press(0, 4); check("refused gear nobody buys now skips junk: none -> favorite", kind("moonstalker") == "favorite")
 press(0, 4); SlashCmdList.JUNKMARK("forget"); press(0, 4)
@@ -635,8 +636,16 @@ check("Shift-right-click on gear nobody buys unmarks it and teaches nothing", ki
 press(0, 4); B.scripts.PostClick(B, "RightButton", true); fire("UI_ERROR_MESSAGE", 414, "That item is not a valid target.")
 check("a right-click is an attempt like a left-click: the game's refusal after it is learned", kind("moonstalker") == nil and JunkMarkDB.refused[13262][9001] == true and JunkMarkDB.attempts == 5)
 check("...and the trace names the buttons", table.concat(JunkMarkDB.trace, "\n"):find("click Shift-RightButton up head 9001", 1, true) ~= nil and table.concat(JunkMarkDB.trace, "\n"):find("click RightButton down head 9001", 1, true) ~= nil)
+-- a client in another language words the refusal differently; it is the string's name that is matched
+ERR_INVALID_ITEM_TARGET = "Dieser Gegenstand ist kein gueltiges Ziel."
+SlashCmdList.JUNKMARK("forget"); press(0, 4); B.scripts.PostClick(B, "LeftButton", true); fire("UI_ERROR_MESSAGE", 414, "Dieser Gegenstand ist kein gueltiges Ziel.")
+check("the refusal is recognised by the name of the game's string, so in any language", kind("moonstalker") == nil and JunkMarkDB.refused[13262][9001] == true)
+ERR_INVALID_ITEM_TARGET, SPELL_FAILED_WRONG_ARTIFACT_EQUIPPED = nil, nil
+SlashCmdList.JUNKMARK("forget"); press(0, 4); B.scripts.PostClick(B, "LeftButton", true); fire("UI_ERROR_MESSAGE", 414, "That item is not a valid target.")
+check("...and the English words alone, with no game string behind them, teach nothing", kind("moonstalker") == "junk" and JunkMarkDB.refused == nil)
+shift = true; B.scripts.PostClick(B, "RightButton", false); shift = false
 press(0, 3, 2)
-A_GAME_STRING_NAME, another_value = nil, nil
+another_value = nil
 
 -- /jm debug writes what the game reports about each junk-marked item into the saved data
 press(0, 2); SlashCmdList.JUNKMARK("debug")
