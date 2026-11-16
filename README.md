@@ -56,7 +56,7 @@ Junk goes to a vendor unless you send it to a profession. Which of the two an it
 
 ### Selling
 
-A **Sell Junk (N)** button appears below the bottom-right corner of the vendor window, one row under its tabs. It sells every junk item bound for the vendor and reports the total.
+A **Sell Junk (N)** button hangs under the bottom-right corner of the vendor window, in the same row as its tabs. It narrows to fit beside a tab another addon adds, and only drops to a row of its own when there is no room at all. It sells every junk item bound for the vendor and reports the total.
 
 - An item only counts as sold once it has left your bags. Anything the vendor did not take keeps its mark and is reported.
 - Items you can still return for a refund are never sold.

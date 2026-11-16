@@ -91,6 +91,8 @@ local function widget()
   function w:GetPoint() return "CENTER", nil, "CENTER", 1, 2 end
   function w:ClearAllPoints() self.point = nil end
   function w:SetPoint(...) self.point = { ... } end
+  function w:SetSize(width) self.width = width end
+  function w:SetWidth(width) self.width = width end
   return setmetatable(w, { __index = function() return noop end })
 end
 local eventHandler, onUpdate
@@ -391,6 +393,32 @@ check("the vanished stack's leftover mark is cleaned up, and nothing is offered 
 merchantOpen = false; fire("MERCHANT_CLOSED")
 relog()
 check("final state survives login: one favorite stack, nothing else marked", kind("cloth-B") == "favorite" and kind("cloth-A") == nil and kind("sword-B") == nil and btn(0, 3):state() == "favorite" and btn(0, 4):state() == "none" and btn(0, 1):state() == "none")
+
+-- Where Sell Junk sits: in the vendor window's tab row, beside whatever tabs are there.
+-- The window spans x 100..436 with its bottom edge at y 200; tabs hang from y 202 to 170.
+local function tab(right, shown) local t = { shown = shown ~= false }
+  function t:IsForbidden() return false end; function t:IsShown() return self.shown end; function t:IsObjectType(kind) return kind == "Button" end
+  function t:GetTop() return 202 end; function t:GetBottom() return 170 end; function t:GetRight() return right end
+  return t end
+local inside = tab(430); function inside:GetTop() return 260 end; function inside:GetBottom() return 215 end -- a button inside the window, not a tab
+local vendorTabs = {}
+function MerchantFrame:GetLeft() return 100 end; function MerchantFrame:GetBottom() return 200 end; function MerchantFrame:GetWidth() return 336 end
+function MerchantFrame:GetChildren() return JunkMarkSellButton, inside, (unpack or table.unpack)(vendorTabs) end
+local function openVendor(...) vendorTabs = { ... }; merchantOpen = true; fire("MERCHANT_SHOW") end
+local function closeVendor() merchantOpen = false; fire("MERCHANT_CLOSED") end
+local function sellSpot() local s = JunkMarkSellButton; return s.point[1] .. " " .. s.point[3] .. " " .. s.point[4] .. " " .. s.point[5] .. " w" .. s.width end
+openVendor(tab(180), tab(262))
+check("two tabs: Sell Junk sits in the tab row at full width", sellSpot() == "TOPRIGHT BOTTOMRIGHT -4 -2 w140")
+closeVendor(); openVendor(tab(180), tab(262), tab(330))
+check("a third tab from another addon: it narrows to fit beside it", sellSpot() == "TOPRIGHT BOTTOMRIGHT -4 -2 w100")
+closeVendor(); openVendor(tab(180), tab(262), tab(330, false))
+check("a hidden tab does not count", sellSpot() == "TOPRIGHT BOTTOMRIGHT -4 -2 w140")
+closeVendor(); openVendor(tab(180), tab(262), tab(330), tab(400))
+check("no room beside the tabs: it drops to a row of its own under them", sellSpot() == "TOPRIGHT BOTTOMRIGHT -4 -32 w140")
+closeVendor(); openVendor(tab(180), tab(262)); vendorTabs[3] = tab(330)
+check("(a tab added after the vendor opened is not seen yet)", sellSpot() == "TOPRIGHT BOTTOMRIGHT -4 -2 w140")
+nextFrame(); check("...but is a frame later", sellSpot() == "TOPRIGHT BOTTOMRIGHT -4 -2 w100")
+closeVendor(); vendorTabs = {}
 
 -- Which corner the mark icon sits in. Textures are created in order: shade, coin, action, star.
 local function corner(b, i) local p = b.textures[i] and b.textures[i].point; return p and p[1] end

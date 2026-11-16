@@ -843,14 +843,51 @@ function UpdateSellButton()
 	sellButton:SetEnabled((#queue > 0 or heldCount > 0) and not sellRun);
 end
 
+local SELL_BUTTON_WIDTH = 140;
+local SELL_BUTTON_MIN_WIDTH = 80; -- about what "Sell Junk (12)" needs
+local SELL_BUTTON_MARGIN = 4; -- in from the window's right edge
+local SELL_BUTTON_TAB_GAP = 2; -- between the last tab and the button
+
+-- Puts the button under the vendor window's bottom-right corner, in the same row as
+-- the window's tabs, and as wide as the space right of the last tab allows. Other
+-- addons add tabs of their own (Scrap adds a third), so the tabs are measured rather
+-- than assumed: anything that hangs below the window's bottom edge counts. Only when
+-- there is no room beside them does the button drop to a row of its own underneath.
+local function PlaceSellButton()
+	if not sellButton then
+		return;
+	end
+	local frameLeft, frameBottom, frameWidth = MerchantFrame:GetLeft(), MerchantFrame:GetBottom(), MerchantFrame:GetWidth();
+	if not frameLeft or not frameBottom or not frameWidth then
+		return; -- the window has no position yet
+	end
+
+	local tabsRight, tabsBottom = frameLeft, frameBottom;
+	for _, child in ipairs({ MerchantFrame:GetChildren() }) do
+		if child ~= sellButton and not child:IsForbidden() and child:IsShown() and child:IsObjectType("Button") then
+			local top, bottom, right = child:GetTop(), child:GetBottom(), child:GetRight();
+			if top and bottom and right and (top + bottom) / 2 < frameBottom then
+				tabsRight = math.max(tabsRight, right);
+				tabsBottom = math.min(tabsBottom, bottom);
+			end
+		end
+	end
+
+	local room = (frameLeft + frameWidth - SELL_BUTTON_MARGIN) - (tabsRight + SELL_BUTTON_TAB_GAP);
+	sellButton:ClearAllPoints();
+	if room >= SELL_BUTTON_MIN_WIDTH then
+		sellButton:SetWidth(math.min(SELL_BUTTON_WIDTH, room));
+		sellButton:SetPoint("TOPRIGHT", MerchantFrame, "BOTTOMRIGHT", -SELL_BUTTON_MARGIN, -2);
+	else
+		sellButton:SetWidth(SELL_BUTTON_WIDTH);
+		sellButton:SetPoint("TOPRIGHT", MerchantFrame, "BOTTOMRIGHT", -SELL_BUTTON_MARGIN, tabsBottom - frameBottom - 2);
+	end
+end
+
 local function CreateSellButton()
-	-- Hangs below the vendor window's bottom-right corner, one row under its tabs. The
-	-- tab row itself is not safe: other addons add tabs of their own (Scrap adds a third,
-	-- which reached this corner and covered the button).
 	sellButton = CreateFrame("Button", "JunkMarkSellButton", MerchantFrame, "UIPanelButtonTemplate");
-	sellButton:SetSize(140, 24);
-	local tabHeight = MerchantFrameTab1 and MerchantFrameTab1:GetHeight() or 32;
-	sellButton:SetPoint("TOPRIGHT", MerchantFrame, "BOTTOMRIGHT", -4, -(tabHeight + 2));
+	sellButton:SetSize(SELL_BUTTON_WIDTH, 24);
+	sellButton:SetPoint("TOPRIGHT", MerchantFrame, "BOTTOMRIGHT", -SELL_BUTTON_MARGIN, -2);
 	sellButton:SetScript("OnClick", function()
 		SellJunk(IsShiftKeyDown());
 	end);
@@ -1230,6 +1267,10 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
 		if not sellButton then
 			CreateSellButton();
 		end
+		-- Now, and again a frame later: an addon may add its tab while handling this
+		-- same event, after JunkMark has measured.
+		PlaceSellButton();
+		C_Timer.After(0, PlaceSellButton);
 		PruneMarks();
 		RefreshAllBags(); -- puts the click blockers on favorites
 		UpdateSellButton();
