@@ -46,7 +46,7 @@ Hover an item in your bags and press **Space**:
 
 Marking also works in bag addons that draw their own bag window, such as Bagnon, Baganator and EllesmereUIBags. JunkMark has no code specific to any of them: it recognises item buttons built from the game's own bag-button template, which these addons use.
 
-- JunkMark notices such a window the first time your cursor rests on one of its items. Until then, in a fresh session, that window shows no marks; from then on it is kept up to date.
+- JunkMark notices such a window the first time your cursor rests on one of its items, and remembers it. That first hover is needed once per character; after that the window's marks show as soon as it opens, including after a login or `/reload`.
 - Only bag slots can be marked, not bank slots.
 - Bag addons put things of their own in the corners of an item (Baganator and EllesmereUIBags write the item level top-left). The mark icon sits bottom-right by default, under the stack count; if that corner is taken in your layout, move it with `/jm corner`.
 
@@ -64,7 +64,7 @@ A **Sell Junk (N)** button hangs under the bottom-right corner of the vendor win
 
 ### Disenchanting
 
-If your character knows an ability that uses an item up, junk it applies to can be queued for that ability instead of being sold: press Space a second time on the item. Currently that is Disenchant, for uncommon-to-epic weapons and armor that are not quest items. Queued junk is tinted purple with the ability's icon. Gear a vendor will not buy is queued on the first press, since nothing else can be done with it.
+If your character knows an ability that uses an item up, junk it applies to can be queued for that ability instead of being sold: press Space a second time on the item. Currently that is Disenchant, for uncommon-to-epic weapons and armor, except items whose tooltip says they cannot be disenchanted. Queued junk is tinted purple with the ability's icon. Gear a vendor will not buy is queued on the first press, since nothing else can be done with it.
 
 - A small movable panel shows the next item and how many are queued. Click the icon to process that item.
 - The game requires a real click or key press for every spell cast, so the queue cannot run by itself.
@@ -127,7 +127,7 @@ Two bindings are listed under Options > Keybindings > AddOns:
 ## Known Limitations
 
 - **Stacks.** Looting more into a marked stack keeps the mark. Splitting a marked stack leaves the new stack unmarked. Dragging a marked stack onto an unmarked one loses the mark; the other way round keeps it.
-- **Bank.** A junk mark is dropped if the item is not in your bags when you open a vendor. Favorites are kept.
+- **Bank.** A junk mark is dropped if the item is not in your bags when you open a vendor. Favorites are kept, wherever the item is. A favorite mark is only removed for an item you no longer have at all, and that is checked when you open your bank, the one time everything you hold can be seen.
 - **Disenchant's spell ID** is assumed to be `13262`. If an enchanter never sees the queue, run `/jm professions`: it lists the real IDs and warns about a mismatch.
 - **English only.** There are no translations yet.
 

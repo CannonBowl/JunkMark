@@ -15,7 +15,7 @@ local function check(name, cond) if cond then io.write("ok   ", name, "\n") else
 local bags = { [0] = {}, [1] = {} }
 local function put(bag, slot, guid, price, o)
   o = o or {}
-  bags[bag][slot] = { guid = guid, link = "[" .. guid .. "]", price = price, count = o.count or 1, noValue = o.noValue, quality = o.quality or 1, class = o.class or 0, bind = o.bind, icon = "icon:" .. guid }
+  bags[bag][slot] = { guid = guid, link = "[" .. guid .. "]", price = price, count = o.count or 1, noValue = o.noValue, quality = o.quality or 1, class = o.class or 0, tip = o.tip, icon = "icon:" .. guid }
 end
 local merchantOpen, money, tickers, inCombat, knowsDE, shift = false, 0, {}, false, true, false
 local override = {} -- key -> command
@@ -28,19 +28,27 @@ SOUNDKIT = { IG_MAINMENU_OPTION_CHECKBOX_ON = 856, IG_MAINMENU_OPTION_CHECKBOX_O
 PlaySound = function(id) assert(id) end
 SlashCmdList = {}
 NUM_TOTAL_BAG_FRAMES = 1
-Enum = { SpellBookSpellBank = { Player = "PlayerBank" }, ItemQuality = { Uncommon = 2, Epic = 4 }, ItemClass = { Weapon = 2, Armor = 4 }, ItemBind = { Quest = 4 } }
+Enum = { SpellBookSpellBank = { Player = "PlayerBank" }, ItemQuality = { Uncommon = 2, Epic = 4 }, ItemClass = { Weapon = 2, Armor = 4 },
+  BagIndex = { Keyring = -1, Backpack = 0, Bag_1 = 1, CharacterBankTab_1 = 6, AccountBankTab_1 = 15 } }
 IsShiftKeyDown = function() return shift end
 InCombatLockdown = function() return inCombat end
 SetOverrideBinding = function(owner, priority, key, command) assert(not inCombat, "SetOverrideBinding in combat"); assert(owner and priority == true); override[key] = command end
 ClearOverrideBindings = function(owner) assert(not inCombat, "ClearOverrideBindings in combat"); assert(owner); override = {} end
 
 ItemLocation = {}
-function ItemLocation:CreateEmpty() return { SetBagAndSlot = function(self, b, s) self.b, self.s = b, s end } end
+function ItemLocation:CreateEmpty() return { SetBagAndSlot = function(self, b, s) self.b, self.s = b, s end,
+  SetEquipmentSlot = function(self, s) self.b, self.s = "equipped", s end } end -- worn gear lives in bags.equipped
 local function at(loc) return bags[loc.b] and bags[loc.b][loc.s] end
 local function byLink(link) for _, bag in pairs(bags) do for _, it in pairs(bag) do if it.link == link then return it end end end end
+local elsewhere = {} -- GUIDs the game says the character holds although no slot shows them
+ITEM_DISENCHANT_NOT_DISENCHANTABLE = "Cannot be disenchanted"
+C_TooltipInfo = { GetBagItem = function(b, s) local it = bags[b] and bags[b][s]; if not it then return nil end
+  return { lines = { { leftText = it.link }, { leftText = "Binds when picked up" }, it.tip and { leftText = it.tip } or nil } } end }
 C_Item = {
   DoesItemExist = function(loc) return at(loc) ~= nil end,
   GetItemGUID = function(loc) return at(loc).guid end,
+  IsItemGUIDInInventory = function(guid) assert(type(guid) == "string"); if elsewhere[guid] then return true end
+    for _, bag in pairs(bags) do for _, it in pairs(bag) do if it.guid == guid then return true end end end; return false end,
   GetItemInfo = function(link) local it = byLink(link); return "n", link, 1, 1, 1, "t", "st", 1, "", 1, it.price, it.class, 0, it.bind or 1 end, -- 14th: bind type, 4 = quest item
   GetItemInfoInstant = function(link) return 1, "t", "st", "", 1, byLink(link).class, 0 end,
 }
@@ -63,7 +71,7 @@ GetProfessionInfo = function() return "Enchanting", "tex", 150, 300, 2, 10 end
 C_Spell = { GetSpellTexture = function(id) return "spellicon:" .. id end }
 local timers = {} -- C_Timer.After callbacks waiting for the next frame
 C_Timer = { NewTicker = function(_, fn) local t = { fn = fn, Cancel = function(self) self.cancelled = true end }; tickers[#tickers+1] = t; return t end,
-  After = function(delay, fn) assert(delay == 0); timers[#timers+1] = fn end }
+  After = function(delay, fn) assert(type(delay) == "number" and delay >= 0); timers[#timers+1] = fn end } -- any delay runs on nextFrame()
 local function pumpRaw(n) for _ = 1, n do for _, t in ipairs(tickers) do if not t.cancelled then t.fn() end end end end
 local function nextFrame() local due = timers; timers = {}; for _, fn in ipairs(due) do fn() end end
 
@@ -268,14 +276,20 @@ press(0, 7); check("unsellable gear: none -> junk, queued", kind("boundring") ==
 press(0, 7); check("...-> favorite, skipping the vendor step", kind("boundring") == "favorite")
 press(0, 7); bags[0][7] = nil; fire("BAG_UPDATE_DELAYED")
 
--- gear that is a quest item cannot be disenchanted, whatever its quality
-put(0, 7, "questblade", 0, { quality = 2, class = 2, noValue = true, bind = 4 }); fire("BAG_UPDATE_DELAYED")
-press(0, 7); check("a quest-item weapon nobody buys is never queued: none -> favorite", kind("questblade") == "favorite" and btn(0, 7):state() == "favorite" and P.countText.text == "1 item queued")
+-- gear whose tooltip says it cannot be disenchanted is never queued, whatever its quality
+put(0, 7, "questblade", 0, { quality = 2, class = 2, noValue = true, tip = "Cannot be disenchanted" }); fire("BAG_UPDATE_DELAYED")
+press(0, 7); check("refused gear nobody buys is never queued: none -> favorite", kind("questblade") == "favorite" and btn(0, 7):state() == "favorite" and P.countText.text == "1 item queued")
 press(0, 7); check("...-> none", kind("questblade") == nil); bags[0][7] = nil
-put(0, 7, "questshield", 75, { quality = 2, class = 4, bind = 4 }); fire("BAG_UPDATE_DELAYED")
-press(0, 7); check("a quest-item piece a vendor buys is vendor junk", kind("questshield") == "junk" and btn(0, 7):state() == "sell")
-press(0, 7); check("...with no disenchant step: junk -> favorite", kind("questshield") == "favorite" and P.countText.text == "1 item queued")
-press(0, 7); bags[0][7] = nil; fire("BAG_UPDATE_DELAYED")
+put(0, 7, "questcloak", 75, { quality = 2, class = 4, tip = "Cannot be disenchanted" }); fire("BAG_UPDATE_DELAYED")
+press(0, 7); check("refused gear a vendor buys is vendor junk", kind("questcloak") == "junk" and btn(0, 7):state() == "sell")
+press(0, 7); check("...with no disenchant step: junk -> favorite", kind("questcloak") == "favorite" and P.countText.text == "1 item queued")
+-- a mark made for disenchant by an earlier version, before the tooltip was read
+JunkMarkDB.marked.questcloak = { kind = "junk", order = 300 }; fire("SPELLS_CHANGED")
+check("an old disenchant mark on refused gear falls back to the vendor pile", btn(0, 7):state() == "sell" and P.countText.text == "1 item queued")
+JunkMarkDB.marked.questcloak = nil; bags[0][7] = nil; fire("BAG_UPDATE_DELAYED")
+put(0, 7, "plaincloak", 75, { quality = 2, class = 4, tip = "Disenchantable" }); fire("BAG_UPDATE_DELAYED")
+press(0, 7, 2); check("other tooltip lines do not stop a disenchant", btn(0, 7):state() == "queue" and P.countText.text == "2 items queued")
+press(0, 7, 2); bags[0][7] = nil; fire("BAG_UPDATE_DELAYED")
 
 -- a key the player bound themselves works without the hover binding
 foci = { btn(0, 6) }; JunkMark_ToggleHovered(); foci = {}
@@ -403,6 +417,27 @@ merchantOpen = false; fire("MERCHANT_CLOSED")
 relog()
 check("final state survives login: one favorite stack, nothing else marked", kind("cloth-B") == "favorite" and kind("cloth-A") == nil and kind("sword-B") == nil and btn(0, 3):state() == "favorite" and btn(0, 4):state() == "none" and btn(0, 1):state() == "none")
 
+-- Favorites whose item is gone are dropped, but only with the bank open, when everything
+-- the character holds can be seen. Bags now hold cloth-B (a favorite) and little else.
+local function fav(guid, order) JunkMarkDB.marked[guid] = { kind = "favorite", order = order } end
+bags[6], bags.equipped = {}, {}
+fav("banked", 201); put(6, 2, "banked", 1)
+fav("worn", 202); put("equipped", 16, "worn", 1)
+fav("lost", 203)
+fav("odd", 204); elsewhere.odd = true -- no slot shows it, yet the game says the character holds it
+merchantOpen = true; fire("MERCHANT_SHOW"); merchantOpen = false; fire("MERCHANT_CLOSED")
+check("a vendor visit never drops a favorite", kind("lost") == "favorite" and kind("banked") == "favorite")
+fire("BANKFRAME_OPENED"); fire("BANKFRAME_CLOSED"); nextFrame()
+check("opening and shutting the bank before its contents arrive drops nothing", kind("lost") == "favorite")
+local toldAt = #out + 1; fire("BANKFRAME_OPENED")
+check("nothing is dropped the instant the bank opens", kind("lost") == "favorite"); nextFrame()
+check("with the bank open, a favorite that is nowhere is dropped, and said so", kind("lost") == nil and table.concat(out, "\n", toldAt):find("Removed 1 favorite mark for item you no longer have.", 1, true) ~= nil)
+check("...one in the bank, one being worn and one in the bags are kept", kind("banked") == "favorite" and kind("worn") == "favorite" and kind("cloth-B") == "favorite")
+check("...and so is one the game still reports holding", kind("odd") == "favorite")
+fire("BANKFRAME_CLOSED"); fav("lost", 205); bags[6] = {}; fire("BANKFRAME_OPENED"); nextFrame()
+check("an item taken out of the bank and destroyed is dropped at the next bank visit", kind("lost") == nil and kind("banked") == nil and kind("worn") == "favorite")
+fire("BANKFRAME_CLOSED"); JunkMarkDB.marked.worn, JunkMarkDB.marked.odd, elsewhere.odd = nil, nil, nil; bags[6], bags.equipped = nil, nil
+
 -- Where Sell Junk sits: in the vendor window's tab row, beside whatever tabs are there.
 -- The window spans x 100..436 with its bottom edge at y 200; tabs hang from y 202 to 170.
 local function tab(right, shown) local t = { shown = shown ~= false }
@@ -447,6 +482,7 @@ local function plain(parent)
   local f = { kids = {}, hooks = {}, shown = true }
   function f:IsForbidden() return false end
   function f:GetParent() return parent end
+  function f:GetName() return self.name end
   function f:GetChildren() return (unpack or table.unpack)(self.kids) end
   function f:IsShown() return self.shown end
   function f:IsVisible() return self.shown and (parent == UIParent or parent:IsVisible()) end
@@ -469,7 +505,7 @@ end
 local function ticks(n) for _ = 1, n do onUpdate(nil, 0.11) end end
 local function hooked(f) return next(f.hooks) ~= nil end
 
-local window = plain(UIParent); local grid = plain(window)
+local window = plain(UIParent); local grid = plain(window); window.name = "TheirBagWindow"
 local T = {}; for slot = 1, 5 do T[slot] = theirButton(grid, 0, slot) end
 -- bags now: (0,1) sword-B, (0,3) cloth-B favorite, (0,4) cloth-A
 ticks(3)
@@ -529,5 +565,20 @@ local window2 = plain(UIParent); local U = theirButton(window2, 0, 4); local glo
 foci = { glow }; ticks(1); foci = {}
 check("the cursor on a child of an unseen item button still finds the button", hooked(U) and override.SPACE == "JUNKMARK_TOGGLE")
 U:run("OnLeave")
+
+-- The next session: their window is remembered by name, so its marks need no hover.
+check("a followed window with a name is remembered; one without is not", JunkMarkDB.bagWindows.TheirBagWindow == true and next(JunkMarkDB.bagWindows, "TheirBagWindow") == nil)
+relog()
+local again = plain(UIParent); again.name = "TheirBagWindow"; local grid2 = plain(again)
+local N = {}; for slot = 1, 6 do N[slot] = theirButton(grid2, 0, slot) end
+ticks(2); nextFrame()
+check("(their window does not exist yet: nothing to follow)", not hooked(N[1]) and not hooked(N[3]))
+TheirBagWindow = again; ticks(1)
+check("once their window exists it is followed, a frame later, with no hover", not hooked(N[3]))
+nextFrame()
+check("...and its marks are drawn", hooked(N[3]) and N[3]:state() == "favorite" and N[6]:state() == "favorite" and N[1]:state() == "sell" and next(override) == nil)
+JunkMarkDB.bagWindows.Gone = true; JunkMarkDB.bagWindows.NotAFrame = true; NotAFrame = "a string"; ticks(2)
+check("a remembered name that is missing or is not a frame is harmless", true)
+TheirBagWindow, NotAFrame = nil, nil
 
 io.write(fails == 0 and "ALL PASSED\n" or (fails .. " FAILED\n")); os.exit(fails == 0 and 0 or 1)

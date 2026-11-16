@@ -45,10 +45,35 @@ local SCHEMA_VERSION = 3;
 local KIND_JUNK = "junk";
 local KIND_FAVORITE = "favorite";
 
--- Uncommon-to-epic weapons and armor, other than quest items. The game has the final
--- say (skill level, special items), so this only filters out things that can never
--- be disenchanted.
-local function IsDisenchantable(info)
+-- Item links whose tooltip says the item cannot be disenchanted. Only a "yes" is
+-- remembered: it never changes, while a "no" read before the client has the item's
+-- data could be wrong.
+local disenchantRefused = {};
+
+-- Whether the game itself says the item cannot be disenchanted. Some gear of the
+-- right quality and type is refused (quest rewards kept for a quest, special items),
+-- and only the game knows which: it says so with a line in the item's tooltip.
+local function TooltipRefusesDisenchant(info, bag, slot)
+	local refusal = ITEM_DISENCHANT_NOT_DISENCHANTABLE;
+	if not refusal or not C_TooltipInfo or not bag or not slot then
+		return false;
+	end
+	if disenchantRefused[info.hyperlink] then
+		return true;
+	end
+	local data = C_TooltipInfo.GetBagItem(bag, slot);
+	for _, line in ipairs(data and data.lines or {}) do
+		if line.leftText == refusal then
+			disenchantRefused[info.hyperlink] = true;
+			return true;
+		end
+	end
+	return false;
+end
+
+-- Uncommon-to-epic weapons and armor that the game does not refuse outright. The
+-- game still has the final say (skill level), so a queued item can fail on the day.
+local function IsDisenchantable(info, bag, slot)
 	if not info.quality then
 		return false;
 	end
@@ -59,10 +84,7 @@ local function IsDisenchantable(info)
 	if classID ~= Enum.ItemClass.Weapon and classID ~= Enum.ItemClass.Armor then
 		return false;
 	end
-	-- Gear that binds as a quest item cannot be disenchanted. GetItemInfo returns
-	-- nothing for an item the client has not loaded yet; such an item is let through.
-	local bindType = select(14, C_Item.GetItemInfo(info.hyperlink));
-	return bindType ~= Enum.ItemBind.Quest;
+	return not TooltipRefusesDisenchant(info, bag, slot);
 end
 
 -- Profession abilities that are cast on a bag item and use it up. Junk is routed to
@@ -151,9 +173,9 @@ local function GetActionIcon(action)
 end
 
 -- The profession action this character can use on the item, if any.
-local function FindAction(info)
+local function FindAction(info, bag, slot)
 	for _, action in ipairs(ACTIONS) do
-		if IsActionKnown(action) and action.IsEligible(info) then
+		if IsActionKnown(action) and action.IsEligible(info, bag, slot) then
 			return action;
 		end
 	end
@@ -163,11 +185,11 @@ end
 -- What will happen to a junk-marked item: an ACTIONS entry (it waits in the
 -- profession queue), DISPOSAL_SELL, or nil if nothing can be done with it.
 -- mark.sellOnly is set when the player sends a queued item to the vendor instead.
-local function GetDisposal(mark, info)
+local function GetDisposal(mark, info, bag, slot)
 	if not mark or mark.kind ~= KIND_JUNK or not info then
 		return nil;
 	end
-	local action = not mark.sellOnly and FindAction(info) or nil;
+	local action = not mark.sellOnly and FindAction(info, bag, slot) or nil;
 	if action then
 		return action;
 	end
@@ -347,7 +369,7 @@ local function UpdateButtonOverlay(button)
 		overlay = CreateOverlay(button);
 	end
 
-	local disposal = isJunk and GetDisposal(mark, C_Container.GetContainerItemInfo(bag, slot)) or nil;
+	local disposal = isJunk and GetDisposal(mark, C_Container.GetContainerItemInfo(bag, slot), bag, slot) or nil;
 	local action = disposal ~= DISPOSAL_SELL and disposal or nil;
 	if action then
 		overlay.shade:SetColorTexture(action.tint[1], action.tint[2], action.tint[3], 0.55);
@@ -526,6 +548,14 @@ local function QueueForeignRefresh()
 	end
 end
 
+-- A followed window was shown (or has just been found). Its buttons are collected on
+-- the next frame, and once more a little later for an addon that lays them out late.
+local FOREIGN_SECOND_LOOK_SECONDS = 0.5;
+local function OnForeignWindowShown()
+	QueueForeignRefresh();
+	C_Timer.After(FOREIGN_SECOND_LOOK_SECONDS, RefreshForeignButtons);
+end
+
 -- Starts following the window a newly seen item button belongs to: the frame just
 -- below UIParent in its parent chain. Returns false for the default UI's own frames.
 local function FollowForeignWindow(button)
@@ -538,9 +568,41 @@ local function FollowForeignWindow(button)
 	end
 	if not foreignWindows[window] then
 		foreignWindows[window] = true;
-		window:HookScript("OnShow", QueueForeignRefresh);
+		window:HookScript("OnShow", OnForeignWindowShown);
+		-- Remembered by name, so the next session can follow it before any hover.
+		local name = window:GetName();
+		if name then
+			db.bagWindows = db.bagWindows or {};
+			db.bagWindows[name] = true;
+		end
 	end
 	return true;
+end
+
+-- Follows the windows remembered from earlier sessions as soon as they exist. Bag
+-- addons create their window lazily, often on the first open, so this is asked on
+-- every look until each name has turned up. Without it a window would show no marks
+-- after a login or /reload until the cursor first touched one of its items.
+local rememberedFound = {}; -- window name -> followed this session
+local function FollowRememberedWindows()
+	local found = false;
+	for name in pairs(db.bagWindows or {}) do
+		if not rememberedFound[name] then
+			local window = _G[name];
+			if type(window) == "table" and type(window.IsForbidden) == "function" and not window:IsForbidden()
+				and type(window.HookScript) == "function" and type(window.GetChildren) == "function" then
+				rememberedFound[name] = true;
+				if not IsDefaultBagFrame(window) and not foreignWindows[window] then
+					foreignWindows[window] = true;
+					window:HookScript("OnShow", OnForeignWindowShown);
+					found = true;
+				end
+			end
+		end
+	end
+	if found then
+		OnForeignWindowShown();
+	end
 end
 
 -- Redraws any visible button whose slot now holds a different item than was drawn.
@@ -592,6 +654,7 @@ watcher:SetScript("OnUpdate", function(_, elapsed)
 		return;
 	end
 	sinceWatch = 0;
+	FollowRememberedWindows();
 	WatchCursor();
 	watchTicks = watchTicks + 1;
 	if watchTicks >= RECHECK_TICKS then
@@ -639,7 +702,7 @@ function CycleSlot(bag, slot)
 	local mark = db.marked[guid];
 	local current = mark and mark.kind;
 	local canSell = not info.hasNoValue;
-	local hasAction = FindAction(info) ~= nil;
+	local hasAction = FindAction(info, bag, slot) ~= nil;
 
 	local nextKind, sellOnly;
 	if current == KIND_JUNK then
@@ -691,13 +754,74 @@ function JunkMark_ToggleHovered()
 end
 
 -- Drops junk marks for items that are no longer in the bags (sold, traded, used up).
--- Favorites are kept even when the item is out of sight, since it may be in the bank.
+-- Favorites are kept even when the item is out of sight, since it may be in the bank;
+-- PruneFavorites deals with those.
 local function PruneMarks()
 	local present = GetBagGUIDs();
 	for guid, mark in pairs(db.marked) do
 		if mark.kind == KIND_JUNK and not present[guid] then
 			db.marked[guid] = nil;
 		end
+	end
+end
+
+local bankOpen = false;
+local equipLocation = ItemLocation:CreateEmpty();
+local BANK_SETTLE_SECONDS = 1; -- between the bank opening and looking through it
+
+-- The GUID of everything the character holds outside its bags that can be looked at:
+-- what it is wearing and what is in the bank. Also returns how many bank slots were
+-- looked at, which is 0 when the bank cannot be read. The bank's containers are taken
+-- from the client's own list of bag indexes, so this follows whatever bank it has.
+local function GetStoredGUIDs()
+	local stored, bankSlots = {}, 0;
+	for slot = (INVSLOT_FIRST_EQUIPPED or 1), (INVSLOT_LAST_EQUIPPED or 19) do
+		equipLocation:SetEquipmentSlot(slot);
+		if C_Item.DoesItemExist(equipLocation) then
+			stored[C_Item.GetItemGUID(equipLocation)] = true;
+		end
+	end
+	for name, bag in pairs(Enum.BagIndex or {}) do
+		if type(name) == "string" and name:lower():find("banktab_", 1, true) then
+			local slots = C_Container.GetContainerNumSlots(bag) or 0;
+			bankSlots = bankSlots + slots;
+			for slot = 1, slots do
+				local guid = GetSlotGUID(bag, slot);
+				if guid then
+					stored[guid] = true;
+				end
+			end
+		end
+	end
+	return stored, bankSlots;
+end
+
+-- Drops favorite marks whose item no longer exists (sold by hand, destroyed, traded,
+-- mailed away), so the saved data does not grow forever. A favorite out of the bags is
+-- usually just in the bank, so this only runs while the bank is open, and a mark is
+-- dropped only if the item is in none of bags, bank and worn gear AND the game itself
+-- says the character no longer holds it. If either look fails, the mark is kept.
+local function PruneFavorites()
+	if not db or not bankOpen or not C_Item.IsItemGUIDInInventory then
+		return;
+	end
+	local stored, bankSlots = GetStoredGUIDs();
+	if bankSlots == 0 then
+		return;
+	end
+	local present = GetBagGUIDs();
+	local dropped = 0;
+	for guid, mark in pairs(db.marked) do
+		if mark.kind == KIND_FAVORITE and not present[guid] and not stored[guid] then
+			local ok, held = pcall(C_Item.IsItemGUIDInInventory, guid);
+			if ok and held == false then
+				db.marked[guid] = nil;
+				dropped = dropped + 1;
+			end
+		end
+	end
+	if dropped > 0 then
+		Print(string.format("Removed %d favorite mark%s for item%s you no longer have.", dropped, Plural(dropped), Plural(dropped)));
 	end
 end
 
@@ -724,7 +848,7 @@ local function CollectJunk(includeHeld)
 	ForEachBagItem(function(bag, slot, guid)
 		local mark = db.marked[guid];
 		local info = mark and C_Container.GetContainerItemInfo(bag, slot);
-		local disposal = GetDisposal(mark, info);
+		local disposal = GetDisposal(mark, info, bag, slot);
 		if disposal and not info.hasNoValue then
 			if IsRefundable(bag, slot) then
 				refundableCount = refundableCount + 1;
@@ -928,7 +1052,7 @@ local function CollectProcessQueue()
 	local queue = {};
 	ForEachBagItem(function(bag, slot, guid)
 		local mark = db.marked[guid];
-		local disposal = mark and GetDisposal(mark, C_Container.GetContainerItemInfo(bag, slot));
+		local disposal = mark and GetDisposal(mark, C_Container.GetContainerItemInfo(bag, slot), bag, slot);
 		if disposal and disposal ~= DISPOSAL_SELL then
 			queue[#queue + 1] = { bag = bag, slot = slot, guid = guid, action = disposal, order = mark.order or 0 };
 		end
@@ -1260,6 +1384,8 @@ eventFrame:RegisterEvent("BAG_UPDATE_DELAYED");
 eventFrame:RegisterEvent("SPELLS_CHANGED");
 eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED");
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED");
+eventFrame:RegisterEvent("BANKFRAME_OPENED");
+eventFrame:RegisterEvent("BANKFRAME_CLOSED");
 eventFrame:SetScript("OnEvent", function(_, event, arg1)
 	if event == "ADDON_LOADED" then
 		if arg1 == addonName then
@@ -1288,6 +1414,12 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
 		merchantOpen = false;
 		FinishSelling();
 		RefreshAllBags();
+	elseif event == "BANKFRAME_OPENED" then
+		-- Not straight away: the bank's contents arrive just after it opens.
+		bankOpen = true;
+		C_Timer.After(BANK_SETTLE_SECONDS, PruneFavorites);
+	elseif event == "BANKFRAME_CLOSED" then
+		bankOpen = false;
 	elseif event == "BAG_UPDATE_DELAYED" then
 		QueueForeignRefresh();
 		ApplyHoverKey();
