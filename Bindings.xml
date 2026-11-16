@@ -1,0 +1,7 @@
+<Bindings>
+	<Binding name="JUNKMARK_TOGGLE" header="JUNKMARK" category="ADDONS">
+		JunkMark_ToggleHovered();
+	</Binding>
+	<!-- Presses the secure button that disenchants the item at the head of the queue. -->
+	<Binding name="CLICK JunkMarkProcessButton:LeftButton" category="ADDONS"/>
+</Bindings>
