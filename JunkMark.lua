@@ -1108,8 +1108,10 @@ local function SkipQueueHead()
 	if info and not info.hasNoValue then
 		mark.sellOnly = true;
 	else
-		-- Nothing else can be done with an unsellable item, so just unmark it.
+		-- Nothing else can be done with an unsellable item, so unmark it, and say so:
+		-- a mark that vanishes without a word looks like a bug.
 		db.marked[head.guid] = nil;
+		Print(string.format("%s can't be sold to a vendor either, so its mark was removed.", info and info.hyperlink or "That item"));
 	end
 	OnMarksChanged();
 end
@@ -1131,6 +1133,11 @@ local lastAttempt; -- the last left-click on the queue button: { guid, bag, slot
 local function NoteAttempt()
 	local head = processButton and processButton.head;
 	lastAttempt = head and { guid = head.guid, bag = head.bag, slot = head.slot, action = head.action, time = GetTime() } or nil;
+	-- A running count, saved, so a report of "nothing happened" can be told apart
+	-- from "the button was never left-clicked".
+	if db then
+		db.attempts = (db.attempts or 0) + 1;
+	end
 end
 
 local function IsFinalRefusal(action, message)
@@ -1174,12 +1181,16 @@ local function OnErrorMessage(errorType, message)
 	end
 
 	-- Kept so a report of "it won't disenchant X" can be matched to what the game said.
+	-- The name lookup walks every global the client has, which is not something to
+	-- trust blindly: if it fails, the failure is recorded and the rest carries on.
+	local found, names = pcall(FindGlobalStringNames, message);
 	db.lastRefusal = {
 		message = message,
 		errorType = errorType,
 		itemID = info.itemID,
 		link = info.hyperlink,
-		globals = FindGlobalStringNames(message),
+		globals = found and names or nil,
+		lookupError = not found and tostring(names) or nil,
 	};
 
 	if not info.itemID or not IsFinalRefusal(attempt.action, message) then
