@@ -611,6 +611,20 @@ relog(); P, B = JunkMarkQueuePanel, JunkMarkProcessButton
 press(0, 1); press(0, 1); press(0, 1)
 check("what was learned survives login", JunkMarkDB.refused[13262][5387] == true and kind("cloak-A") == "favorite" and B.head.guid == "belt")
 
+-- What this client really says for such an item is a generic message whose string name is not known yet.
+A_GAME_STRING_NAME, another_value = "That item is not a valid target.", "That item is not a valid target."
+put(0, 4, "moonstalker", 0, { quality = 2, class = 4, noValue = true, id = 9001 }); ContainerFrameCombinedBags:UpdateItems()
+press(0, 3, 2); press(0, 4)
+check("(unsellable gear is queued on the first press, and is now next)", B.head.guid == "moonstalker" and kind("belt") == nil)
+B.scripts.PostClick(B, "LeftButton", true); fire("UI_ERROR_MESSAGE", 414, "That item is not a valid target.")
+check("'not a valid target' after an attempt is final too", kind("moonstalker") == nil and JunkMarkDB.refused[13262][9001] == true and not P.shown)
+check("...and the name of the game string that holds the text is recorded", #JunkMarkDB.lastRefusal.globals == 1 and JunkMarkDB.lastRefusal.globals[1] == "A_GAME_STRING_NAME" and JunkMarkDB.lastRefusal.errorType == 414)
+press(0, 4); check("refused gear nobody buys now skips junk: none -> favorite", kind("moonstalker") == "favorite")
+press(0, 4); SlashCmdList.JUNKMARK("forget"); press(0, 4)
+check("'/jm forget' lets a refused item be queued again", JunkMarkDB.refused == nil and kind("moonstalker") == "junk" and B.head.guid == "moonstalker")
+B.scripts.PostClick(B, "LeftButton", true); fire("UI_ERROR_MESSAGE", 414, "That item is not a valid target."); press(0, 3, 2)
+A_GAME_STRING_NAME, another_value = nil, nil
+
 -- /jm debug writes what the game reports about each junk-marked item into the saved data
 press(0, 2); SlashCmdList.JUNKMARK("debug")
 local dump = JunkMarkDB.debug

@@ -2,7 +2,7 @@
 ## Title: JunkMark
 ## Author: CannonBowl
 ## Notes: Hover a bag item and press Space to mark it as junk or favorite. Junk is sold or disenchanted in bulk; favorites can't be sold.
-## Version: 0.5.1
+## Version: 0.5.2
 ## IconTexture: Interface\Icons\INV_Misc_Coin_02
 ## SavedVariablesPerCharacter: JunkMarkDB
 

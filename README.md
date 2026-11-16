@@ -121,6 +121,9 @@ Two bindings are listed under Options > Keybindings > AddOns:
 /jm corner
 /jm corner topright
 
+# Forget which items the game refused to disenchant, so they can be queued again.
+/jm forget
+
 # Write what the game reports about each junk-marked item into the saved data,
 # to attach to a bug report. It is on disk after a /reload.
 /jm debug

@@ -106,7 +106,13 @@ local ACTIONS = {
 		fallbackIcon = [[Interface\Icons\INV_Enchant_Disenchant]],
 		tint = { 0.35, 0.1, 0.55 },
 		IsEligible = IsDisenchantable,
+		-- Names of the game's own strings, so the match holds in every language.
 		finalRefusals = { "SPELL_FAILED_CANT_BE_DISENCHANTED" },
+		-- What this client actually answered for the Enchanted Moonstalker Cloak
+		-- (2026-11-16, enUS): a generic "can't target that item", error type 414. Its
+		-- string's name is not known yet, so it is matched as English text for now;
+		-- lastRefusal.globals records the name the next time it is seen.
+		finalRefusalTexts = { "That item is not a valid target." },
 	},
 };
 
@@ -1133,7 +1139,25 @@ local function IsFinalRefusal(action, message)
 			return true;
 		end
 	end
+	for _, text in ipairs(action.finalRefusalTexts or {}) do
+		if text == message then
+			return true;
+		end
+	end
 	return false;
+end
+
+-- The names of the game's global strings that hold exactly this text, for the record
+-- kept in lastRefusal. A walk over every global, so only done when an attempt fails.
+local function FindGlobalStringNames(message)
+	local names = {};
+	for name, value in pairs(_G) do
+		if value == message and type(name) == "string" and name:match("^[A-Z][A-Z0-9_]+$") then
+			names[#names + 1] = name;
+		end
+	end
+	table.sort(names);
+	return names;
 end
 
 local function OnErrorMessage(errorType, message)
@@ -1150,7 +1174,13 @@ local function OnErrorMessage(errorType, message)
 	end
 
 	-- Kept so a report of "it won't disenchant X" can be matched to what the game said.
-	db.lastRefusal = { message = message, errorType = errorType, itemID = info.itemID, link = info.hyperlink };
+	db.lastRefusal = {
+		message = message,
+		errorType = errorType,
+		itemID = info.itemID,
+		link = info.hyperlink,
+		globals = FindGlobalStringNames(message),
+	};
 
 	if not info.itemID or not IsFinalRefusal(attempt.action, message) then
 		return;
@@ -1430,6 +1460,11 @@ SlashCmdList["JUNKMARK"] = function(message)
 		PrintProfessions();
 	elseif command == "debug" then
 		WriteDebugDump();
+	elseif command == "forget" then
+		-- The way back if the game refused an item for a reason that has since passed.
+		db.refused = nil;
+		OnMarksChanged();
+		Print("Forgot which items the game refused. They can be queued again.");
 	elseif command:match("^corner") then
 		local corner = command:match("^corner%s+(%a+)$");
 		if corner and CORNERS[corner] then
@@ -1449,6 +1484,7 @@ SlashCmdList["JUNKMARK"] = function(message)
 		print("  /jm auto        - toggle selling automatically when a vendor opens");
 		print("  /jm professions - show your professions and how junk is routed");
 		print("  /jm corner      - show or set which corner of an item the mark icon sits in");
+		print("  /jm forget      - forget which items the game refused to disenchant");
 		print("  /jm debug       - write details of junk-marked items to the saved data, for a bug report");
 		print("  /jm clear       - remove every mark");
 	end
