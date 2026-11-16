@@ -15,7 +15,7 @@ local function check(name, cond) if cond then io.write("ok   ", name, "\n") else
 local bags = { [0] = {}, [1] = {} }
 local function put(bag, slot, guid, price, o)
   o = o or {}
-  bags[bag][slot] = { guid = guid, link = "[" .. guid .. "]", price = price, count = o.count or 1, noValue = o.noValue, quality = o.quality or 1, class = o.class or 0, icon = "icon:" .. guid }
+  bags[bag][slot] = { guid = guid, link = "[" .. guid .. "]", price = price, count = o.count or 1, noValue = o.noValue, quality = o.quality or 1, class = o.class or 0, bind = o.bind, icon = "icon:" .. guid }
 end
 local merchantOpen, money, tickers, inCombat, knowsDE, shift = false, 0, {}, false, true, false
 local override = {} -- key -> command
@@ -28,7 +28,7 @@ SOUNDKIT = { IG_MAINMENU_OPTION_CHECKBOX_ON = 856, IG_MAINMENU_OPTION_CHECKBOX_O
 PlaySound = function(id) assert(id) end
 SlashCmdList = {}
 NUM_TOTAL_BAG_FRAMES = 1
-Enum = { SpellBookSpellBank = { Player = "PlayerBank" }, ItemQuality = { Uncommon = 2, Epic = 4 }, ItemClass = { Weapon = 2, Armor = 4 } }
+Enum = { SpellBookSpellBank = { Player = "PlayerBank" }, ItemQuality = { Uncommon = 2, Epic = 4 }, ItemClass = { Weapon = 2, Armor = 4 }, ItemBind = { Quest = 4 } }
 IsShiftKeyDown = function() return shift end
 InCombatLockdown = function() return inCombat end
 SetOverrideBinding = function(owner, priority, key, command) assert(not inCombat, "SetOverrideBinding in combat"); assert(owner and priority == true); override[key] = command end
@@ -41,7 +41,7 @@ local function byLink(link) for _, bag in pairs(bags) do for _, it in pairs(bag)
 C_Item = {
   DoesItemExist = function(loc) return at(loc) ~= nil end,
   GetItemGUID = function(loc) return at(loc).guid end,
-  GetItemInfo = function(link) return "n", link, 1, 1, 1, "t", "st", 1, "", 1, byLink(link).price end,
+  GetItemInfo = function(link) local it = byLink(link); return "n", link, 1, 1, 1, "t", "st", 1, "", 1, it.price, it.class, 0, it.bind or 1 end, -- 14th: bind type, 4 = quest item
   GetItemInfoInstant = function(link) return 1, "t", "st", "", 1, byLink(link).class, 0 end,
 }
 C_Container = {
@@ -266,6 +266,15 @@ press(0, 7, 2); bags[0][7] = nil; fire("BAG_UPDATE_DELAYED")
 put(0, 7, "boundring", 0, { quality = 2, class = 4, noValue = true }); fire("BAG_UPDATE_DELAYED")
 press(0, 7); check("unsellable gear: none -> junk, queued", kind("boundring") == "junk" and btn(0, 7):state() == "queue")
 press(0, 7); check("...-> favorite, skipping the vendor step", kind("boundring") == "favorite")
+press(0, 7); bags[0][7] = nil; fire("BAG_UPDATE_DELAYED")
+
+-- gear that is a quest item cannot be disenchanted, whatever its quality
+put(0, 7, "questblade", 0, { quality = 2, class = 2, noValue = true, bind = 4 }); fire("BAG_UPDATE_DELAYED")
+press(0, 7); check("a quest-item weapon nobody buys is never queued: none -> favorite", kind("questblade") == "favorite" and btn(0, 7):state() == "favorite" and P.countText.text == "1 item queued")
+press(0, 7); check("...-> none", kind("questblade") == nil); bags[0][7] = nil
+put(0, 7, "questshield", 75, { quality = 2, class = 4, bind = 4 }); fire("BAG_UPDATE_DELAYED")
+press(0, 7); check("a quest-item piece a vendor buys is vendor junk", kind("questshield") == "junk" and btn(0, 7):state() == "sell")
+press(0, 7); check("...with no disenchant step: junk -> favorite", kind("questshield") == "favorite" and P.countText.text == "1 item queued")
 press(0, 7); bags[0][7] = nil; fire("BAG_UPDATE_DELAYED")
 
 -- a key the player bound themselves works without the hover binding

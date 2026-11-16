@@ -45,8 +45,9 @@ local SCHEMA_VERSION = 3;
 local KIND_JUNK = "junk";
 local KIND_FAVORITE = "favorite";
 
--- Uncommon-to-epic weapons and armor. The game has the final say (skill level,
--- special items), so this only filters out things that can never be disenchanted.
+-- Uncommon-to-epic weapons and armor, other than quest items. The game has the final
+-- say (skill level, special items), so this only filters out things that can never
+-- be disenchanted.
 local function IsDisenchantable(info)
 	if not info.quality then
 		return false;
@@ -55,7 +56,13 @@ local function IsDisenchantable(info)
 		return false;
 	end
 	local classID = select(6, C_Item.GetItemInfoInstant(info.hyperlink));
-	return classID == Enum.ItemClass.Weapon or classID == Enum.ItemClass.Armor;
+	if classID ~= Enum.ItemClass.Weapon and classID ~= Enum.ItemClass.Armor then
+		return false;
+	end
+	-- Gear that binds as a quest item cannot be disenchanted. GetItemInfo returns
+	-- nothing for an item the client has not loaded yet; such an item is let through.
+	local bindType = select(14, C_Item.GetItemInfo(info.hyperlink));
+	return bindType ~= Enum.ItemBind.Quest;
 end
 
 -- Profession abilities that are cast on a bag item and use it up. Junk is routed to
