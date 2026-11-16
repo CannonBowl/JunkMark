@@ -15,7 +15,7 @@ local function check(name, cond) if cond then io.write("ok   ", name, "\n") else
 local bags = { [0] = {}, [1] = {} }
 local function put(bag, slot, guid, price, o)
   o = o or {}
-  bags[bag][slot] = { guid = guid, link = "[" .. guid .. "]", price = price, count = o.count or 1, noValue = o.noValue, quality = o.quality or 1, class = o.class or 0, tip = o.tip, icon = "icon:" .. guid }
+  bags[bag][slot] = { guid = guid, link = "[" .. guid .. "]", price = price, count = o.count or 1, noValue = o.noValue, quality = o.quality or 1, class = o.class or 0, tip = o.tip, id = o.id, icon = "icon:" .. guid }
 end
 local merchantOpen, money, tickers, inCombat, knowsDE, shift = false, 0, {}, false, true, false
 local override = {} -- key -> command
@@ -42,6 +42,9 @@ local function at(loc) return bags[loc.b] and bags[loc.b][loc.s] end
 local function byLink(link) for _, bag in pairs(bags) do for _, it in pairs(bag) do if it.link == link then return it end end end end
 local elsewhere = {} -- GUIDs the game says the character holds although no slot shows them
 ITEM_DISENCHANT_NOT_DISENCHANTABLE = "Cannot be disenchanted"
+SPELL_FAILED_CANT_BE_DISENCHANTED = "Item cannot be disenchanted"
+local clock = 100; GetTime = function() return clock end
+date = os.date
 C_TooltipInfo = { GetBagItem = function(b, s) local it = bags[b] and bags[b][s]; if not it then return nil end
   return { lines = { { leftText = it.link }, { leftText = "Binds when picked up" }, it.tip and { leftText = it.tip } or nil } } end }
 C_Item = {
@@ -55,7 +58,8 @@ C_Item = {
 C_Container = {
   GetContainerNumSlots = function() return 8 end,
   GetContainerItemInfo = function(b, s) local it = bags[b] and bags[b][s]; if not it then return nil end
-    return { hyperlink = it.link, stackCount = it.count, hasNoValue = it.noValue or false, isLocked = false, quality = it.quality, iconFileID = it.icon } end,
+    return { hyperlink = it.link, stackCount = it.count, hasNoValue = it.noValue or false, isLocked = false, quality = it.quality, iconFileID = it.icon, itemID = it.id or it.guid } end,
+  GetContainerItemQuestInfo = function(b, s) return { isQuestItem = false, isActive = false } end,
   GetContainerItemLink = function(b, s) return bags[b][s] and bags[b][s].link end,
   UseContainerItem = function(b, s) assert(merchantOpen, "sold with no merchant"); local it = bags[b][s]; assert(not refundable[it.guid], "sold a refundable item"); if refused[it.guid] then return end; money = money + it.price * it.count; bags[b][s] = nil end,
   GetContainerItemPurchaseInfo = function(b, s, equipped) assert(equipped == false); local it = bags[b][s]; local r = it and refundable[it.guid]; return { money = r and 500 or 0, itemCount = 0, currencyCount = 0, refundSeconds = r and 3600 or 0, hasEnchants = false } end,
@@ -162,7 +166,7 @@ put(1, 3, "heirloom", 5000, { quality = 4, class = 4 })
 
 JunkMarkDB = { marked = { cloth = true, bluestaff = { kind = "disenchant", order = 1 }, mystery = { kind = "keep" }, garbage = 7 }, nextOrder = 1 }
 assert(loadfile(addonPath))("RenamedFolder", {})
-local function fire(ev, a) eventHandler(nil, ev, a) end
+local function fire(ev, ...) eventHandler(nil, ev, ...) end
 local function pump(n) pumpRaw(n); fire("BAG_UPDATE_DELAYED") end
 local function kind(g) return JunkMarkDB.marked[g] and JunkMarkDB.marked[g].kind end
 -- press the hover key the way the game would: only does anything while the override binding is set
@@ -580,5 +584,39 @@ check("...and its marks are drawn", hooked(N[3]) and N[3]:state() == "favorite" 
 JunkMarkDB.bagWindows.Gone = true; JunkMarkDB.bagWindows.NotAFrame = true; NotAFrame = "a string"; ticks(2)
 check("a remembered name that is missing or is not a frame is harmless", true)
 TheirBagWindow, NotAFrame = nil, nil
+
+-- Gear the game refuses to disenchant although nothing says so in advance: the queue
+-- button's attempt draws the game's error, and that teaches JunkMark about the item.
+relog(); knowsDE = true; fire("SPELLS_CHANGED")
+bags[0], bags[1] = {}, {}; JunkMarkDB.marked = {}; fire("BAG_UPDATE_DELAYED"); ContainerFrameCombinedBags:UpdateItems()
+put(0, 1, "cloak-A", 75, { quality = 2, class = 4, id = 5387 }); put(0, 2, "cloak-B", 75, { quality = 2, class = 4, id = 5387 })
+put(0, 3, "belt", 40, { quality = 2, class = 4, id = 777 }); ContainerFrameCombinedBags:UpdateItems()
+press(0, 1, 2); press(0, 3, 2); press(0, 2)
+P, B = JunkMarkQueuePanel, JunkMarkProcessButton
+check("(two items queued, the cloak first; its twin marked for the vendor)", B.head.guid == "cloak-A" and P.countText.text == "2 items queued" and btn(0, 2):state() == "sell")
+fire("UI_ERROR_MESSAGE", 51, "Item cannot be disenchanted")
+check("an error with no attempt behind it teaches nothing", kind("cloak-A") == "junk" and JunkMarkDB.refused == nil and JunkMarkDB.lastRefusal == nil)
+B.scripts.PostClick(B, "LeftButton", false); fire("UI_ERROR_MESSAGE", 20, "Can't do that while moving")
+check("an ordinary error after an attempt is recorded but teaches nothing", kind("cloak-A") == "junk" and JunkMarkDB.refused == nil and JunkMarkDB.lastRefusal.message == "Can't do that while moving" and JunkMarkDB.lastRefusal.itemID == 5387)
+B.scripts.PostClick(B, "LeftButton", false); clock = clock + 5; fire("UI_ERROR_MESSAGE", 51, "Item cannot be disenchanted")
+check("the game's refusal arriving long after the attempt is not tied to it", kind("cloak-A") == "junk" and JunkMarkDB.refused == nil)
+local refusedAt = #out + 1
+B.scripts.PostClick(B, "LeftButton", false); clock = clock + 0.3; fire("UI_ERROR_MESSAGE", 51, "Item cannot be disenchanted")
+check("the game's refusal right after an attempt: the item is unmarked and remembered", kind("cloak-A") == nil and btn(0, 1):state() == "none" and JunkMarkDB.refused[13262][5387] == true and table.concat(out, "\n", refusedAt):find("can't be used with Disenchant", 1, true) ~= nil)
+check("...the queue moves on to the next item", B.head.guid == "belt" and P.countText.text == "1 item queued")
+check("...and its twin, marked for the vendor, keeps that mark", kind("cloak-B") == "junk" and btn(0, 2):state() == "sell")
+press(0, 2); check("that kind of item no longer has a disenchant step: vendor junk -> favorite", kind("cloak-B") == "favorite")
+press(0, 2); press(0, 1); press(0, 1); check("...on either copy", kind("cloak-A") == "favorite" and P.countText.text == "1 item queued")
+relog(); P, B = JunkMarkQueuePanel, JunkMarkProcessButton
+press(0, 1); press(0, 1); press(0, 1)
+check("what was learned survives login", JunkMarkDB.refused[13262][5387] == true and kind("cloak-A") == "favorite" and B.head.guid == "belt")
+
+-- /jm debug writes what the game reports about each junk-marked item into the saved data
+press(0, 2); SlashCmdList.JUNKMARK("debug")
+local dump = JunkMarkDB.debug
+check("'/jm debug' records each junk-marked item with the facts that decide its routing", #dump.items == 2 and type(dump.when) == "string")
+local byID = {}; for _, it in ipairs(dump.items) do byID[it.itemID] = it end
+check("...including where it is routed and its tooltip lines", byID[777].routedTo == "Disenchant" and byID[5387].routedTo == "sell" and byID[5387].sellOnly == true and byID[777].classID == 4 and byID[777].quality == 2 and byID[777].tooltip[2] == "Binds when picked up")
+relog(); check("...and the dump survives the trip to disk", #JunkMarkDB.debug.items == 2)
 
 io.write(fails == 0 and "ALL PASSED\n" or (fails .. " FAILED\n")); os.exit(fails == 0 and 0 or 1)

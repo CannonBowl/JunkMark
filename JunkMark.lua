@@ -91,6 +91,12 @@ end
 -- the first entry whose spell the character knows and whose IsEligible accepts the
 -- item (it receives the slot's C_Container.GetContainerItemInfo table).
 --
+-- finalRefusals names the game's own error strings that mean "never, for this kind of
+-- item". Nothing the client exposes says in advance which gear that is: some carries
+-- a tooltip line, some (quest gear such as the Enchanted Moonstalker Cloak) carries
+-- nothing. So when a queued item draws one of these errors, JunkMark remembers the
+-- item's ID and stops offering the ability for it (see "Refused items").
+--
 -- Forever has the original nine professions, and Disenchant is the only one of
 -- their abilities that works this way. Adding another is one more entry here.
 local ACTIONS = {
@@ -100,6 +106,7 @@ local ACTIONS = {
 		fallbackIcon = [[Interface\Icons\INV_Enchant_Disenchant]],
 		tint = { 0.35, 0.1, 0.55 },
 		IsEligible = IsDisenchantable,
+		finalRefusals = { "SPELL_FAILED_CANT_BE_DISENCHANTED" },
 	},
 };
 
@@ -173,9 +180,15 @@ local function GetActionIcon(action)
 end
 
 -- The profession action this character can use on the item, if any.
+-- Whether the game has already refused this ability for this kind of item.
+local function IsRefused(action, itemID)
+	local refused = db and db.refused and db.refused[action.spellID];
+	return refused ~= nil and itemID ~= nil and refused[itemID] == true;
+end
+
 local function FindAction(info, bag, slot)
 	for _, action in ipairs(ACTIONS) do
-		if IsActionKnown(action) and action.IsEligible(info, bag, slot) then
+		if IsActionKnown(action) and not IsRefused(action, info.itemID) and action.IsEligible(info, bag, slot) then
 			return action;
 		end
 	end
@@ -1095,6 +1108,73 @@ local function SkipQueueHead()
 	OnMarksChanged();
 end
 
+--------------------------------------------------------------------------------
+-- Refused items
+--
+-- The game refuses to disenchant some gear of the right quality and type, and gives
+-- an addon no way to know beforehand. What it does give is the error it shows when
+-- the attempt is made. So the queue button notes each attempt, and an error that
+-- arrives right after one, for the item that was tried, is taken as the game's answer
+-- about that item. Only the errors an ability lists as final teach JunkMark anything;
+-- every other error ("can't do that while moving") is just recorded.
+--------------------------------------------------------------------------------
+
+local REFUSAL_WINDOW_SECONDS = 1.5;
+local lastAttempt; -- the last left-click on the queue button: { guid, bag, slot, action, time }
+
+local function NoteAttempt()
+	local head = processButton and processButton.head;
+	lastAttempt = head and { guid = head.guid, bag = head.bag, slot = head.slot, action = head.action, time = GetTime() } or nil;
+end
+
+local function IsFinalRefusal(action, message)
+	for _, name in ipairs(action.finalRefusals or {}) do
+		if _G[name] ~= nil and _G[name] == message then
+			return true;
+		end
+	end
+	return false;
+end
+
+local function OnErrorMessage(errorType, message)
+	local attempt = lastAttempt;
+	if not attempt or not db or GetTime() - attempt.time > REFUSAL_WINDOW_SECONDS then
+		return;
+	end
+	if GetSlotGUID(attempt.bag, attempt.slot) ~= attempt.guid then
+		return;
+	end
+	local info = C_Container.GetContainerItemInfo(attempt.bag, attempt.slot);
+	if not info then
+		return;
+	end
+
+	-- Kept so a report of "it won't disenchant X" can be matched to what the game said.
+	db.lastRefusal = { message = message, errorType = errorType, itemID = info.itemID, link = info.hyperlink };
+
+	if not info.itemID or not IsFinalRefusal(attempt.action, message) then
+		return;
+	end
+	lastAttempt = nil;
+	db.refused = db.refused or {};
+	db.refused[attempt.action.spellID] = db.refused[attempt.action.spellID] or {};
+	db.refused[attempt.action.spellID][info.itemID] = true;
+
+	-- The marks on this kind of item come off rather than falling back to the vendor
+	-- pile: the player asked for a disenchant, which is not a request to sell.
+	ForEachBagItem(function(bag, slot, guid)
+		local mark = db.marked[guid];
+		if mark and mark.kind == KIND_JUNK and not mark.sellOnly then
+			local other = C_Container.GetContainerItemInfo(bag, slot);
+			if other and other.itemID == info.itemID then
+				db.marked[guid] = nil;
+			end
+		end
+	end);
+	Print(string.format("%s can't be used with %s. Its mark was removed, and JunkMark won't offer that for it again.", info.hyperlink, attempt.action.label));
+	OnMarksChanged();
+end
+
 local function CreateQueuePanel()
 	queuePanel = CreateFrame("Frame", "JunkMarkQueuePanel", UIParent);
 	queuePanel:SetSize(160, 52);
@@ -1157,6 +1237,8 @@ local function CreateQueuePanel()
 	processButton:SetScript("PostClick", function(_, mouseButton, down)
 		if mouseButton == "RightButton" and not down and not InCombatLockdown() then
 			SkipQueueHead();
+		elseif mouseButton == "LeftButton" then
+			NoteAttempt();
 		end
 	end);
 
@@ -1201,6 +1283,45 @@ end
 
 -- Prints the character's professions with the abilities each one puts in the
 -- spellbook, then how junk is routed on this character.
+-- /jm debug: writes what the game reports about every junk-marked item in the bags
+-- into the saved data, where it can be read from disk after a /reload. For working
+-- out why an item is routed the way it is; nothing reads it back.
+local function WriteDebugDump()
+	local items = {};
+	ForEachBagItem(function(bag, slot, guid)
+		local mark = db.marked[guid];
+		if not mark or mark.kind ~= KIND_JUNK then
+			return;
+		end
+		local info = C_Container.GetContainerItemInfo(bag, slot);
+		local disposal = GetDisposal(mark, info, bag, slot);
+		local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(info.hyperlink);
+		local quest = C_Container.GetContainerItemQuestInfo and C_Container.GetContainerItemQuestInfo(bag, slot);
+		local lines = {};
+		local tooltip = C_TooltipInfo and C_TooltipInfo.GetBagItem(bag, slot);
+		for _, line in ipairs(tooltip and tooltip.lines or {}) do
+			lines[#lines + 1] = (line.leftText or "") .. (line.rightText and line.rightText ~= "" and (" | " .. line.rightText) or "");
+		end
+		items[#items + 1] = {
+			link = info.hyperlink,
+			itemID = info.itemID,
+			quality = info.quality,
+			hasNoValue = info.hasNoValue,
+			isBound = info.isBound,
+			classID = classID,
+			subclassID = subclassID,
+			bindType = select(14, C_Item.GetItemInfo(info.hyperlink)),
+			isQuestItem = quest and quest.isQuestItem,
+			questID = quest and quest.questID,
+			sellOnly = mark.sellOnly,
+			routedTo = disposal == DISPOSAL_SELL and "sell" or disposal and disposal.label or "nothing",
+			tooltip = lines,
+		};
+	end);
+	db.debug = { when = date("%Y-%m-%d %H:%M:%S"), items = items };
+	Print(string.format("Wrote details of %d junk-marked item%s to the saved data. /reload to put it on disk.", #items, Plural(#items)));
+end
+
 local function PrintProfessions()
 	local function PrintProfession(index)
 		local name, _, rank, maxRank, numSpells, spellOffset = GetProfessionInfo(index);
@@ -1307,6 +1428,8 @@ SlashCmdList["JUNKMARK"] = function(message)
 		Print("Auto-sell when a vendor opens is now " .. (db.autoSell and "|cff40ff40on|r" or "|cffff4040off|r") .. ".");
 	elseif command == "professions" or command == "prof" then
 		PrintProfessions();
+	elseif command == "debug" then
+		WriteDebugDump();
 	elseif command:match("^corner") then
 		local corner = command:match("^corner%s+(%a+)$");
 		if corner and CORNERS[corner] then
@@ -1326,6 +1449,7 @@ SlashCmdList["JUNKMARK"] = function(message)
 		print("  /jm auto        - toggle selling automatically when a vendor opens");
 		print("  /jm professions - show your professions and how junk is routed");
 		print("  /jm corner      - show or set which corner of an item the mark icon sits in");
+		print("  /jm debug       - write details of junk-marked items to the saved data, for a bug report");
 		print("  /jm clear       - remove every mark");
 	end
 end
@@ -1384,9 +1508,10 @@ eventFrame:RegisterEvent("BAG_UPDATE_DELAYED");
 eventFrame:RegisterEvent("SPELLS_CHANGED");
 eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED");
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED");
+eventFrame:RegisterEvent("UI_ERROR_MESSAGE");
 eventFrame:RegisterEvent("BANKFRAME_OPENED");
 eventFrame:RegisterEvent("BANKFRAME_CLOSED");
-eventFrame:SetScript("OnEvent", function(_, event, arg1)
+eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 	if event == "ADDON_LOADED" then
 		if arg1 == addonName then
 			InitializeSavedVariables();
@@ -1414,6 +1539,8 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
 		merchantOpen = false;
 		FinishSelling();
 		RefreshAllBags();
+	elseif event == "UI_ERROR_MESSAGE" then
+		OnErrorMessage(arg1, arg2);
 	elseif event == "BANKFRAME_OPENED" then
 		-- Not straight away: the bank's contents arrive just after it opens.
 		bankOpen = true;

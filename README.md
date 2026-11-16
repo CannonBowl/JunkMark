@@ -72,6 +72,7 @@ If your character knows an ability that uses an item up, junk it applies to can 
 - Right-click the icon to send that item back to the vendor pile.
 - Shift-click **Sell Junk** to sell the queued items too.
 - The queue pauses during combat.
+- Some gear cannot be disenchanted and the game does not say so until you try. When the game refuses a queued item outright, JunkMark removes its mark, tells you, and stops offering to disenchant that kind of item.
 
 A character with no such ability sells all junk. Junk marked for the vendor stays vendor junk if the ability is learned later.
 
@@ -119,6 +120,10 @@ Two bindings are listed under Options > Keybindings > AddOns:
 # topleft, topright, bottomleft, bottomright. Bottom right by default.
 /jm corner
 /jm corner topright
+
+# Write what the game reports about each junk-marked item into the saved data,
+# to attach to a bug report. It is on disk after a /reload.
+/jm debug
 
 # Remove every mark, favorites included.
 /jm clear
