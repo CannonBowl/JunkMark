@@ -42,6 +42,13 @@ Hover an item in your bags and press **Space**:
 - An item that can be neither sold nor used by a profession skips junk and goes straight to favorite.
 - An item your character can disenchant **and** a vendor will buy has two junk steps: the first press makes it vendor junk (coin), the second queues it for disenchanting instead (purple, with the ability's icon), and the third makes it a favorite.
 
+### Other bag addons
+
+Marking also works in bag addons that draw their own bag window, such as Bagnon, Baganator and EllesmereUIBags. JunkMark has no code specific to any of them: it recognises item buttons built from the game's own bag-button template, which these addons use.
+
+- JunkMark notices such a window the first time your cursor rests on one of its items. Until then, in a fresh session, that window shows no marks; from then on it is kept up to date.
+- Only bag slots can be marked, not bank slots.
+
 ## Junk
 
 Junk goes to a vendor unless you send it to a profession. Which of the two an item can go to depends on your character and the item.

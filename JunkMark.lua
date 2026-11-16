@@ -364,8 +364,216 @@ local function ForEachContainerFrame(callback)
 	end
 end
 
+--------------------------------------------------------------------------------
+-- Other bag addons
+--
+-- Bagnon, Baganator, EllesmereUIBags and the like hide the default bag frames and
+-- draw their own. They all build their item buttons from Blizzard's own template
+-- (ContainerFrameItemButtonTemplate), because that is what keeps the game's secure
+-- item click working, and for the same reason each button reports its real slot
+-- through GetBagID() and GetID(). So such a button can be hooked and decorated
+-- exactly like a default one, with no code specific to any of those addons.
+--
+-- What differs is finding the buttons: there is no shared list and they are created
+-- lazily. JunkMark notices a window the first time the cursor rests on one of its
+-- item buttons, then follows that window. Nothing is hooked on the buttons beyond
+-- script hooks; a button being reused for another slot (sorting, categories) is
+-- caught by comparing what each visible button holds against what was last drawn.
+--------------------------------------------------------------------------------
+
+local WATCH_INTERVAL = 0.1; -- seconds between looks at what is under the cursor
+local RECHECK_TICKS = 3; -- every this many looks, visible buttons are compared too
+local PARENT_CLIMB = 3; -- the cursor may be on a child frame of the item button
+
+local foreignWindows = setmetatable({}, { __mode = "k" }); -- top-level bag window -> true
+local foreignButtons = setmetatable({}, { __mode = "k" }); -- item button -> GUID last drawn, or false
+local buttonVerdicts = setmetatable({}, { __mode = "k" }); -- frame -> is it a bag item button
+local foreignRefreshQueued = false;
+
+-- A button made from Blizzard's bag item template. Bag-bar slot buttons and others
+-- answer GetBagID as well; only item buttons also carry the junk-coin method.
+local function IsBagItemButton(frame)
+	local verdict = buttonVerdicts[frame];
+	if verdict == nil then
+		verdict = not frame:IsForbidden()
+			and type(frame.GetBagID) == "function"
+			and type(frame.UpdateJunkItem) == "function";
+		buttonVerdicts[frame] = verdict;
+	end
+	return verdict;
+end
+
+-- The button's slot if it is in the player's bags. The same template is used for
+-- bank slots, which JunkMark does not mark.
+local function GetPlayerBagSlot(button)
+	local bag, slot = button:GetBagID(), button:GetID();
+	if type(bag) == "number" and bag >= 0 and bag <= (NUM_TOTAL_BAG_FRAMES or 4) and slot and slot >= 1 then
+		return bag, slot;
+	end
+	return nil;
+end
+
+-- The default UI's own bag and bank frames. Their buttons are handled through
+-- UpdateItems above and must never be treated as another addon's.
+local function IsDefaultBagFrame(frame)
+	if frame == ContainerFrameCombinedBags or frame == ContainerFrameContainer or frame == BankFrame then
+		return true;
+	end
+	local frames = ContainerFrameContainer and ContainerFrameContainer.ContainerFrames;
+	if frames then
+		for _, containerFrame in ipairs(frames) do
+			if containerFrame == frame then
+				return true;
+			end
+		end
+	end
+	return false;
+end
+
+local function ForeignEnter(button)
+	if GetPlayerBagSlot(button) then
+		HoverEnter(button);
+	end
+end
+
+local function DrawForeignButton(button)
+	foreignButtons[button] = GetSlotGUID(button:GetBagID(), button:GetID()) or false;
+	UpdateButtonOverlay(button);
+end
+
+local function AdoptForeignButton(button)
+	if hookedButtons[button] then
+		return;
+	end
+	hookedButtons[button] = true;
+	foreignButtons[button] = false;
+	button:HookScript("OnEnter", ForeignEnter);
+	button:HookScript("OnLeave", HoverLeave);
+	button:HookScript("OnHide", HoverLeave);
+end
+
+-- Adopts every bag item button under a frame. Hidden ones are adopted too, since a
+-- window can show them later without being reopened.
+local function CollectForeignButtons(frame, depth)
+	if frame:IsForbidden() then
+		return;
+	end
+	if IsBagItemButton(frame) then
+		AdoptForeignButton(frame);
+		return;
+	end
+	if depth < 12 then
+		for _, child in ipairs({ frame:GetChildren() }) do
+			CollectForeignButtons(child, depth + 1);
+		end
+	end
+end
+
+-- Re-collects the buttons of every open window being followed and redraws them.
+local function RefreshForeignButtons()
+	foreignRefreshQueued = false;
+	if not db then
+		return;
+	end
+	for window in pairs(foreignWindows) do
+		if window:IsShown() then
+			CollectForeignButtons(window, 0);
+		end
+	end
+	for button in pairs(foreignButtons) do
+		if button:IsVisible() then
+			DrawForeignButton(button);
+		end
+	end
+end
+
+-- Runs RefreshForeignButtons on the next frame, once, however often it is asked. The
+-- delay lets the bag addon finish its own update first: on a bag event JunkMark may
+-- be told before the addon has moved its buttons to their new slots.
+local function QueueForeignRefresh()
+	if not foreignRefreshQueued and next(foreignWindows) then
+		foreignRefreshQueued = true;
+		C_Timer.After(0, RefreshForeignButtons);
+	end
+end
+
+-- Starts following the window a newly seen item button belongs to: the frame just
+-- below UIParent in its parent chain. Returns false for the default UI's own frames.
+local function FollowForeignWindow(button)
+	local window, parent = button, button:GetParent();
+	while parent and parent ~= UIParent do
+		if IsDefaultBagFrame(parent) then
+			return false;
+		end
+		window, parent = parent, parent:GetParent();
+	end
+	if not foreignWindows[window] then
+		foreignWindows[window] = true;
+		window:HookScript("OnShow", QueueForeignRefresh);
+	end
+	return true;
+end
+
+-- Redraws any visible button whose slot now holds a different item than was drawn.
+local function RecheckForeignButtons()
+	local changed = false;
+	for button, drawn in pairs(foreignButtons) do
+		if button:IsVisible() then
+			local guid = GetSlotGUID(button:GetBagID(), button:GetID()) or false;
+			if guid ~= drawn then
+				DrawForeignButton(button);
+				changed = true;
+			end
+		end
+	end
+	if changed then
+		ApplyHoverKey();
+	end
+end
+
+-- Looks for a bag item button under the cursor that has not been seen before.
+local function WatchCursor()
+	local frame = GetMouseFoci()[1];
+	for _ = 1, PARENT_CLIMB do
+		if not frame or frame:IsForbidden() or hookedButtons[frame] or blockerOwners[frame] then
+			return;
+		end
+		if IsBagItemButton(frame) then
+			break;
+		end
+		frame = frame:GetParent();
+	end
+	if not frame or frame:IsForbidden() or hookedButtons[frame] or not IsBagItemButton(frame) then
+		return;
+	end
+	if GetPlayerBagSlot(frame) and FollowForeignWindow(frame) then
+		RefreshForeignButtons();
+		-- The cursor was already on this button before it was hooked.
+		if hookedButtons[frame] then
+			ForeignEnter(frame);
+		end
+	end
+end
+
+local watcher = CreateFrame("Frame");
+local sinceWatch, watchTicks = 0, 0;
+watcher:SetScript("OnUpdate", function(_, elapsed)
+	sinceWatch = sinceWatch + elapsed;
+	if sinceWatch < WATCH_INTERVAL or not db then
+		return;
+	end
+	sinceWatch = 0;
+	WatchCursor();
+	watchTicks = watchTicks + 1;
+	if watchTicks >= RECHECK_TICKS then
+		watchTicks = 0;
+		RecheckForeignButtons();
+	end
+end);
+
 local function RefreshAllBags()
 	ForEachContainerFrame(RefreshContainerFrame);
+	RefreshForeignButtons();
 end
 
 local function OnMarksChanged()
@@ -446,7 +654,9 @@ function JunkMark_ToggleHovered()
 	end
 
 	local button = frame and GetItemButton(frame);
-	if button then
+	-- Another addon's bank buttons are hooked along with its bag buttons, so the
+	-- slot is checked here rather than assumed to be in the bags.
+	if button and GetPlayerBagSlot(button) then
 		CycleSlot(button:GetBagID(), button:GetID());
 	end
 end
@@ -997,6 +1207,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
 		FinishSelling();
 		RefreshAllBags();
 	elseif event == "BAG_UPDATE_DELAYED" then
+		QueueForeignRefresh();
 		ApplyHoverKey();
 		UpdateSellButton();
 		UpdateQueuePanel();

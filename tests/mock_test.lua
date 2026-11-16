@@ -61,8 +61,11 @@ C_SpellBook = {
 GetProfessions = function() return 1, nil end
 GetProfessionInfo = function() return "Enchanting", "tex", 150, 300, 2, 10 end
 C_Spell = { GetSpellTexture = function(id) return "spellicon:" .. id end }
-C_Timer = { NewTicker = function(_, fn) local t = { fn = fn, Cancel = function(self) self.cancelled = true end }; tickers[#tickers+1] = t; return t end }
+local timers = {} -- C_Timer.After callbacks waiting for the next frame
+C_Timer = { NewTicker = function(_, fn) local t = { fn = fn, Cancel = function(self) self.cancelled = true end }; tickers[#tickers+1] = t; return t end,
+  After = function(delay, fn) assert(delay == 0); timers[#timers+1] = fn end }
 local function pumpRaw(n) for _ = 1, n do for _, t in ipairs(tickers) do if not t.cancelled then t.fn() end end end end
+local function nextFrame() local due = timers; timers = {}; for _, fn in ipairs(due) do fn() end end
 
 local noop = function() end
 local function widget()
@@ -88,13 +91,13 @@ local function widget()
   function w:GetPoint() return "CENTER", nil, "CENTER", 1, 2 end
   return setmetatable(w, { __index = function() return noop end })
 end
-local eventHandler
+local eventHandler, onUpdate
 local childrenOf = {}
 CreateFrame = function(_, name, parent, template)
   local f = widget()
   if template == "SecureActionButtonTemplate" then f.secure = true end
   local set = f.SetScript
-  function f:SetScript(n, fn) set(self, n, fn); if n == "OnEvent" then eventHandler = fn end end
+  function f:SetScript(n, fn) set(self, n, fn); if n == "OnEvent" then eventHandler = fn elseif n == "OnUpdate" then onUpdate = fn end end
   if name then _G[name] = f end
   if parent then childrenOf[parent] = f end
   return f
@@ -330,7 +333,7 @@ end
 -- Log out and back in: saved data goes through the disk format, every frame is new,
 -- and the addon file runs again from the top.
 local function relog()
-  merchantOpen, inCombat, override, tickers, foci = false, false, {}, {}, {}
+  merchantOpen, inCombat, override, tickers, foci, timers = false, false, {}, {}, {}, {}
   for i = 1, #buttons do buttons[i] = button(math.floor((i - 1) / 8), (i - 1) % 8 + 1) end
   ContainerFrameCombinedBags.UpdateItems = function() end
   JunkMarkQueuePanel, JunkMarkProcessButton, JunkMarkSellButton = nil, nil, nil
@@ -386,5 +389,95 @@ check("the vanished stack's leftover mark is cleaned up, and nothing is offered 
 merchantOpen = false; fire("MERCHANT_CLOSED")
 relog()
 check("final state survives login: one favorite stack, nothing else marked", kind("cloth-B") == "favorite" and kind("cloth-A") == nil and kind("sword-B") == nil and btn(0, 3):state() == "favorite" and btn(0, 4):state() == "none" and btn(0, 1):state() == "none")
+
+-- Another bag addon (Bagnon, Baganator, EllesmereUIBags): its own window, with item
+-- buttons made from the same Blizzard template. These frames are plain tables with only
+-- the methods listed, so a call JunkMark has no business making fails instead of passing.
+local function plain(parent)
+  local f = { kids = {}, hooks = {}, shown = true }
+  function f:IsForbidden() return false end
+  function f:GetParent() return parent end
+  function f:GetChildren() return (unpack or table.unpack)(self.kids) end
+  function f:IsShown() return self.shown end
+  function f:IsVisible() return self.shown and (parent == UIParent or parent:IsVisible()) end
+  function f:HookScript(n, fn) self.hooks[n] = self.hooks[n] or {}; table.insert(self.hooks[n], fn) end
+  function f:run(n) for _, fn in ipairs(self.hooks[n] or {}) do fn(self) end end
+  if parent ~= UIParent then table.insert(parent.kids, f) end
+  return f
+end
+-- Like those addons, each button sits in a holder frame of its own, and can be pointed at another slot.
+local function theirButton(grid, bag, slot)
+  local holder = plain(grid)
+  local b = button(bag, slot); b.bag, b.slot, b.shown = bag, slot, true
+  function b:GetBagID() return self.bag end
+  function b:GetID() return self.slot end
+  function b:GetParent() return holder end
+  function b:IsVisible() return self.shown and holder:IsVisible() end
+  holder.kids[1] = b
+  return b
+end
+local function ticks(n) for _ = 1, n do onUpdate(nil, 0.11) end end
+local function hooked(f) return next(f.hooks) ~= nil end
+
+local window = plain(UIParent); local grid = plain(window)
+local T = {}; for slot = 1, 5 do T[slot] = theirButton(grid, 0, slot) end
+-- bags now: (0,1) sword-B, (0,3) cloth-B favorite, (0,4) cloth-A
+ticks(3)
+check("another addon's buttons are left alone until the cursor finds one", not hooked(T[1]) and not hooked(T[3]) and T[3]:state() == "none")
+foci = { T[1] }; ticks(1); foci = {}
+check("resting the cursor on one adopts its whole window and draws the marks", hooked(T[5]) and T[3]:state() == "favorite" and T[1]:state() == "none" and T[4]:state() == "none")
+check("...and Space works on that button straight away", override.SPACE == "JUNKMARK_TOGGLE")
+space(); T[1]:run("OnLeave")
+check("marking through their button draws on theirs and on the default one", kind("sword-B") == "junk" and T[1]:state() == "sell" and btn(0, 1):state() == "sell" and next(override) == nil)
+T[4]:run("OnEnter"); check("their other buttons take Space through the hover hook", override.SPACE == "JUNKMARK_TOGGLE"); T[4]:run("OnLeave")
+T[5]:run("OnEnter"); check("an empty slot of theirs does not take Space", next(override) == nil); T[5]:run("OnLeave")
+
+-- their addon sorts: two buttons trade slots, and no game event says so
+T[1].slot, T[3].slot = 3, 1
+check("(stale until looked at again)", T[1]:state() == "sell" and T[3]:state() == "favorite")
+ticks(3)
+check("a button pointed at another slot is redrawn for what it now holds", T[1]:state() == "favorite" and T[3]:state() == "sell")
+
+-- a bag update: their addon adds a button for a newly filled slot
+put(0, 6, "gem", 50); JunkMarkDB.marked.gem = { kind = "junk", order = 50, sellOnly = true }
+T[6] = theirButton(grid, 0, 6); fire("BAG_UPDATE_DELAYED")
+check("a bag update is acted on a frame later, after their addon has caught up", not hooked(T[6]))
+nextFrame()
+check("...and then picks up the button they added", hooked(T[6]) and T[6]:state() == "sell")
+
+-- their window is closed while a mark changes, then reopened
+window.shown = false
+ContainerFrameCombinedBags:UpdateItems(); press(0, 6)
+check("a hidden window is not redrawn", kind("gem") == "favorite" and T[6]:state() == "sell")
+window.shown = true; window:run("OnShow"); nextFrame()
+check("reopening their window brings its marks up to date", T[6]:state() == "favorite")
+
+merchantOpen = true; fire("MERCHANT_SHOW")
+check("a favorite in their window gets the click blocker at a vendor", T[6]:blocked() and T[1]:blocked() and not T[3]:blocked())
+merchantOpen = false; fire("MERCHANT_CLOSED")
+check("...lifted when the vendor closes", not T[6]:blocked() and not T[1]:blocked())
+
+-- their bank window uses the same buttons; bank slots are not markable
+local bank = plain(UIParent); local bankSlot = theirButton(bank, 7, 1)
+foci = { bankSlot }; ticks(1)
+check("a bank slot under the cursor is not adopted", not hooked(bankSlot))
+bankSlot = theirButton(grid, 7, 2); fire("BAG_UPDATE_DELAYED"); nextFrame(); bankSlot:run("OnEnter")
+check("a bank slot inside a followed window does not take Space", hooked(bankSlot) and next(override) == nil)
+local function markCount() local n = 0; for _ in pairs(JunkMarkDB.marked) do n = n + 1 end; return n end
+local marksBefore = markCount(); put(1, 2, "decoy", 10) -- a real item at the slot number the bank button carries
+foci = { bankSlot }; JunkMark_ToggleHovered(); foci = {}
+check("...and a user-bound key does not mark it", markCount() == marksBefore and marksBefore == 3)
+
+-- things that must not be mistaken for another addon's bag button
+local stray = button(0, 4); function stray:GetParent() return ContainerFrameCombinedBags end
+foci = { stray }; ticks(1)
+check("a default-UI bag button is never adopted as another addon's", not hooked(stray))
+local bagBar = plain(UIParent); function bagBar:GetBagID() return 0 end; function bagBar:GetID() return 1 end
+foci = { bagBar }; ticks(1)
+check("a frame that answers GetBagID but is not an item button is ignored", not hooked(bagBar) and next(override) == nil)
+local window2 = plain(UIParent); local U = theirButton(window2, 0, 4); local glow = plain(U.GetParent(U)); function glow:GetParent() return U end
+foci = { glow }; ticks(1); foci = {}
+check("the cursor on a child of an unseen item button still finds the button", hooked(U) and override.SPACE == "JUNKMARK_TOGGLE")
+U:run("OnLeave")
 
 io.write(fails == 0 and "ALL PASSED\n" or (fails .. " FAILED\n")); os.exit(fails == 0 and 0 or 1)
