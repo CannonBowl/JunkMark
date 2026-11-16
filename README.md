@@ -40,6 +40,7 @@ Hover an item in your bags and press **Space**:
 - Space is only taken over while the cursor is on a bag item. Everywhere else it still jumps.
 - It does not work during combat, because the game does not let addons change key bindings in combat.
 - An item that can be neither sold nor used by a profession skips junk and goes straight to favorite.
+- An item your character can disenchant **and** a vendor will buy has two junk steps: the first press queues it for disenchanting (purple, with the ability's icon), the second makes it plain vendor junk (coin), and the third makes it a favorite.
 
 ## Junk
 
@@ -47,7 +48,7 @@ You only ever mark junk. Where it goes depends on your character and the item.
 
 ### Selling
 
-A **Sell Junk (N)** button appears below the bottom-right corner of the vendor window. It sells every junk item bound for the vendor and reports the total.
+A **Sell Junk (N)** button appears below the bottom-right corner of the vendor window, one row under its tabs. It sells every junk item bound for the vendor and reports the total.
 
 - An item only counts as sold once it has left your bags. Anything the vendor did not take keeps its mark and is reported.
 - Items you can still return for a refund are never sold.
@@ -60,7 +61,7 @@ If your character knows an ability that uses an item up, junk it applies to is q
 - A small movable panel shows the next item and how many are queued. Click the icon to process that item.
 - The game requires a real click or key press for every spell cast, so the queue cannot run by itself.
 - Items are processed in the order you marked them.
-- Right-click the icon to send that item to the vendor pile instead.
+- To sell an item instead of disenchanting it, press Space on it once more in your bags, or right-click the icon while it is next in the queue.
 - Shift-click **Sell Junk** to sell the queued items too.
 - The queue pauses during combat.
 

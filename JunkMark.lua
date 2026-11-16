@@ -378,11 +378,11 @@ end
 -- Marking
 --------------------------------------------------------------------------------
 
-local function SetMark(guid, kind)
+local function SetMark(guid, kind, sellOnly)
 	if kind then
 		-- The order number makes the profession queue first-marked, first-processed.
 		db.nextOrder = (db.nextOrder or 0) + 1;
-		db.marked[guid] = { kind = kind, order = db.nextOrder };
+		db.marked[guid] = { kind = kind, order = db.nextOrder, sellOnly = sellOnly or nil };
 	else
 		db.marked[guid] = nil;
 	end
@@ -390,6 +390,8 @@ end
 
 -- Steps an item through: unmarked -> junk -> favorite -> unmarked.
 -- Junk is skipped for an item that can be neither sold nor used by a profession.
+-- Junk that a profession can use and a vendor will also buy takes two steps: first
+-- queued for the profession, then plain vendor junk, so the player can pick either.
 function CycleSlot(bag, slot)
 	local guid = GetSlotGUID(bag, slot);
 	local info = guid and C_Container.GetContainerItemInfo(bag, slot);
@@ -399,18 +401,23 @@ function CycleSlot(bag, slot)
 
 	local mark = db.marked[guid];
 	local current = mark and mark.kind;
-	local canBeJunk = not info.hasNoValue or FindAction(info) ~= nil;
+	local canSell = not info.hasNoValue;
+	local hasAction = FindAction(info) ~= nil;
 
-	local nextKind;
+	local nextKind, sellOnly;
 	if current == KIND_JUNK then
-		nextKind = KIND_FAVORITE;
+		if hasAction and canSell and not mark.sellOnly then
+			nextKind, sellOnly = KIND_JUNK, true;
+		else
+			nextKind = KIND_FAVORITE;
+		end
 	elseif current == KIND_FAVORITE then
 		nextKind = nil;
 	else
-		nextKind = canBeJunk and KIND_JUNK or KIND_FAVORITE;
+		nextKind = (canSell or hasAction) and KIND_JUNK or KIND_FAVORITE;
 	end
 
-	SetMark(guid, nextKind);
+	SetMark(guid, nextKind, sellOnly);
 	PlaySound(nextKind and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF);
 	OnMarksChanged();
 end
@@ -601,10 +608,13 @@ function UpdateSellButton()
 end
 
 local function CreateSellButton()
-	-- Hangs below the vendor window's bottom-right corner, clear of the tabs at bottom-left.
+	-- Hangs below the vendor window's bottom-right corner, one row under its tabs. The
+	-- tab row itself is not safe: other addons add tabs of their own (Scrap adds a third,
+	-- which reached this corner and covered the button).
 	sellButton = CreateFrame("Button", "JunkMarkSellButton", MerchantFrame, "UIPanelButtonTemplate");
 	sellButton:SetSize(140, 24);
-	sellButton:SetPoint("TOPRIGHT", MerchantFrame, "BOTTOMRIGHT", -4, -2);
+	local tabHeight = MerchantFrameTab1 and MerchantFrameTab1:GetHeight() or 32;
+	sellButton:SetPoint("TOPRIGHT", MerchantFrame, "BOTTOMRIGHT", -4, -(tabHeight + 2));
 	sellButton:SetScript("OnClick", function()
 		SellJunk(IsShiftKeyDown());
 	end);

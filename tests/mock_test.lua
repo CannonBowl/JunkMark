@@ -189,7 +189,10 @@ P, B = JunkMarkQueuePanel, JunkMarkProcessButton
 check("queue is first-marked first (migrated staff, then helm, then ring)", B.head.guid == "bluestaff" and B.attrs.spell1 == 13262 and B.attrs["target-bag1"] == 0 and B.attrs["target-slot1"] == 4 and P.countText.text == "3 items queued" and P.title.text == "Disenchant")
 
 -- favorites at the vendor
-press(1, 3, 2); check("heirloom favorited", kind("heirloom") == "favorite")
+-- gear a vendor will also buy steps through both kinds of junk before favorite
+press(1, 3); check("Space on sellable gear: none -> junk, queued for disenchant", kind("heirloom") == "junk" and btn(1, 3):state() == "queue" and JunkMarkDB.marked.heirloom.sellOnly == nil)
+press(1, 3); check("...-> junk for the vendor instead", kind("heirloom") == "junk" and btn(1, 3):state() == "sell" and JunkMarkDB.marked.heirloom.sellOnly == true)
+press(1, 3); check("...-> favorite, with the vendor-only flag gone", kind("heirloom") == "favorite" and btn(1, 3):state() == "favorite" and JunkMarkDB.marked.heirloom.sellOnly == nil)
 check("no click blocker away from a vendor", not btn(1, 3):blocked())
 JunkMarkDB.marked.banked = { kind = "favorite", order = 99 }; JunkMarkDB.marked.gone = { kind = "junk", order = 98 }
 merchantOpen = true; fire("MERCHANT_SHOW")
@@ -213,7 +216,7 @@ check("skipped head moves to the vendor pile and stays junk", kind("bluestaff") 
 hover(btn(1, 3)); K.scripts.OnEnter(K); unhover(btn(1, 3))
 check("Space still bound when blocker's enter arrives before button's leave", override.SPACE == "JUNKMARK_TOGGLE")
 space(); check("Space on a blocked favorite unmarks it and lifts the blocker", kind("heirloom") == nil and not btn(1, 3):blocked() and next(override) == nil)
-hover(btn(1, 3)); space(); space(); unhover(btn(1, 3)); K.scripts.OnLeave(K)
+hover(btn(1, 3)); space(); space(); space(); unhover(btn(1, 3)); K.scripts.OnLeave(K)
 check("re-favorited at the vendor: blocker returns immediately", kind("heirloom") == "favorite" and btn(1, 3):blocked())
 
 -- shift-click sells held items too, but never favorites
@@ -242,12 +245,24 @@ check("queue advances after a disenchant", B.head.guid == "greenbelt" and B.attr
 -- not an enchanter: all junk is vendor junk
 knowsDE = false; fire("SPELLS_CHANGED")
 check("without Disenchant the same junk goes to the vendor pile", btn(0, 6):state() == "sell" and not P.shown and B.attrs.type1 == nil)
+put(0, 7, "greencloak", 120, { quality = 2, class = 4 }); fire("BAG_UPDATE_DELAYED")
+press(0, 7); check("without Disenchant, gear is plain vendor junk", kind("greencloak") == "junk" and btn(0, 7):state() == "sell" and JunkMarkDB.marked.greencloak.sellOnly == nil)
+press(0, 7); check("...and has no second junk step: junk -> favorite", kind("greencloak") == "favorite")
+press(0, 7); bags[0][7] = nil; fire("BAG_UPDATE_DELAYED")
 knowsDE = true; fire("SPELLS_CHANGED")
 check("learning Disenchant re-routes existing junk", btn(0, 6):state() == "queue" and P.shown)
 
+-- gear a vendor won't buy can only be disenchanted, so it has no vendor step either
+put(0, 7, "boundring", 0, { quality = 2, class = 4, noValue = true }); fire("BAG_UPDATE_DELAYED")
+press(0, 7); check("unsellable gear: none -> junk, queued", kind("boundring") == "junk" and btn(0, 7):state() == "queue")
+press(0, 7); check("...-> favorite, skipping the vendor step", kind("boundring") == "favorite")
+press(0, 7); bags[0][7] = nil; fire("BAG_UPDATE_DELAYED")
+
 -- a key the player bound themselves works without the hover binding
-foci = { btn(0, 6) }; JunkMark_ToggleHovered(); foci = {}
-check("user-bound key cycles the item under the cursor", kind("greenbelt") == "favorite")
+foci = { btn(0, 6) }; JunkMark_ToggleHovered()
+check("user-bound key cycles the item under the cursor", kind("greenbelt") == "junk" and btn(0, 6):state() == "sell" and not P.shown)
+JunkMark_ToggleHovered(); foci = {}
+check("...and again, on to favorite", kind("greenbelt") == "favorite")
 
 merchantOpen = true; fire("MERCHANT_SHOW"); JunkMarkDB.autoSell = true
 SlashCmdList.JUNKMARK("sell all"); pump(2)
@@ -308,7 +323,7 @@ local function roundTrip(value)
     assert(type(v) == "number" or type(v) == "boolean", "saved data holds a " .. type(v))
     return tostring(v)
   end
-  return load("return " .. ser(value))()
+  return (loadstring or load)("return " .. ser(value))() -- loadstring on Lua 5.1, the client's version
 end
 
 -- Log out and back in: saved data goes through the disk format, every frame is new,
