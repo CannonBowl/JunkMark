@@ -285,4 +285,90 @@ SlashCmdList.JUNKMARK("clear"); check("clear removes favorites too and lifts blo
 JunkMarkDB = { schemaVersion = 99, marked = { future = { kind = "disenchant" }, other = { kind = "bank" } } }
 fire("ADDON_LOADED", "RenamedFolder")
 check("newer save is not migrated or re-stamped", JunkMarkDB.schemaVersion == 99 and JunkMarkDB.marked.future.kind == "disenchant" and JunkMarkDB.marked.other.kind == "bank")
+
+--------------------------------------------------------------------------------
+-- Identical items, stacks, and relogging
+--
+-- Marks are keyed by item GUID. These tests pin down that nothing in the addon falls
+-- back to the item's link or ID, and that the saved format survives a logout. They
+-- assume what the game is understood to do: every item instance, and every stack, has
+-- its own GUID, and that GUID is the same after logging back in.
+--------------------------------------------------------------------------------
+
+-- What reaches disk at logout and comes back at login: plain data, no functions.
+local function roundTrip(value)
+  local function ser(v)
+    if type(v) == "table" then
+      local parts = {}
+      for k, x in pairs(v) do parts[#parts + 1] = "[" .. ser(k) .. "]=" .. ser(x) end
+      return "{" .. table.concat(parts, ",") .. "}"
+    elseif type(v) == "string" then
+      return string.format("%q", v)
+    end
+    assert(type(v) == "number" or type(v) == "boolean", "saved data holds a " .. type(v))
+    return tostring(v)
+  end
+  return load("return " .. ser(value))()
+end
+
+-- Log out and back in: saved data goes through the disk format, every frame is new,
+-- and the addon file runs again from the top.
+local function relog()
+  merchantOpen, inCombat, override, tickers, foci = false, false, {}, {}, {}
+  for i = 1, #buttons do buttons[i] = button(math.floor((i - 1) / 8), (i - 1) % 8 + 1) end
+  ContainerFrameCombinedBags.UpdateItems = function() end
+  JunkMarkQueuePanel, JunkMarkProcessButton, JunkMarkSellButton = nil, nil, nil
+  JunkMarkDB = JunkMarkDB and roundTrip(JunkMarkDB)
+  assert(loadfile(addonPath))("RenamedFolder", {})
+  fire("ADDON_LOADED", "RenamedFolder"); fire("PLAYER_LOGIN"); fire("BAG_UPDATE_DELAYED")
+  ContainerFrameCombinedBags:UpdateItems()
+end
+
+bags[0], bags[1] = {}, {}; JunkMarkDB = nil; knowsDE = false; money = 0
+relog()
+
+-- Two swords, and two stacks of cloth, that are the same item in every way a player can see.
+put(0, 1, "sword-A", 100, { class = 2 }); put(0, 2, "sword-B", 100, { class = 2 })
+bags[0][1].link, bags[0][2].link = "[Twin Sword]", "[Twin Sword]"
+put(0, 3, "cloth-A", 5, { count = 20 }); put(0, 4, "cloth-B", 5, { count = 20 })
+bags[0][3].link, bags[0][4].link = "[Linen Cloth]", "[Linen Cloth]"
+ContainerFrameCombinedBags:UpdateItems()
+press(0, 1); press(0, 4, 2)
+check("marking one of two identical swords leaves the other alone", kind("sword-A") == "junk" and kind("sword-B") == nil and btn(0, 1):state() == "sell" and btn(0, 2):state() == "none")
+check("marking one of two identical stacks leaves the other alone", kind("cloth-B") == "favorite" and kind("cloth-A") == nil and btn(0, 4):state() == "favorite" and btn(0, 3):state() == "none")
+
+relog()
+check("marks survive logout and login, on the same items only", kind("sword-A") == "junk" and kind("sword-B") == nil and kind("cloth-B") == "favorite" and kind("cloth-A") == nil
+  and btn(0, 1):state() == "sell" and btn(0, 2):state() == "none" and btn(0, 4):state() == "favorite" and btn(0, 3):state() == "none")
+
+-- Bags get sorted: the identical items trade places.
+bags[0][1], bags[0][2] = bags[0][2], bags[0][1]; bags[0][3], bags[0][4] = bags[0][4], bags[0][3]
+fire("BAG_UPDATE_DELAYED"); ContainerFrameCombinedBags:UpdateItems()
+local function swapped() return btn(0, 2):state() == "sell" and btn(0, 1):state() == "none" and btn(0, 3):state() == "favorite" and btn(0, 4):state() == "none" end
+check("when identical items swap slots, the mark moves with the marked one", swapped())
+relog()
+check("...and it is still on the right one after another login", swapped())
+
+merchantOpen = true; fire("MERCHANT_SHOW")
+SlashCmdList.JUNKMARK("sell all"); pump(4)
+check("selling junk takes only the marked twin", bags[0][2] == nil and bags[0][1] and bags[0][1].guid == "sword-B" and money == 100 and bags[0][3] and bags[0][4])
+merchantOpen = false; fire("MERCHANT_CLOSED")
+
+-- Stacks. Looting more of an item into a marked stack keeps the stack, so keeps the mark.
+bags[0][3].count = 20 + 7; fire("BAG_UPDATE_DELAYED"); ContainerFrameCombinedBags:UpdateItems()
+check("a marked stack that grows keeps its mark", kind("cloth-B") == "favorite" and btn(0, 3):state() == "favorite")
+-- Splitting makes a new stack, with a new GUID.
+bags[0][3].count = 17; put(0, 5, "cloth-C", 5, { count = 10 }); bags[0][5].link = "[Linen Cloth]"
+fire("BAG_UPDATE_DELAYED"); ContainerFrameCombinedBags:UpdateItems()
+check("splitting a marked stack: the original stays marked, the new stack starts unmarked", btn(0, 3):state() == "favorite" and kind("cloth-C") == nil and btn(0, 5):state() == "none")
+-- Merging keeps the destination stack; the stack that was dragged ceases to exist.
+press(0, 5); check("split-off stack can be marked on its own", kind("cloth-C") == "junk" and btn(0, 5):state() == "sell" and btn(0, 4):state() == "none")
+bags[0][4].count = 30; bags[0][5] = nil; fire("BAG_UPDATE_DELAYED"); ContainerFrameCombinedBags:UpdateItems()
+check("merging a junk stack into an unmarked stack leaves the result unmarked", btn(0, 4):state() == "none" and btn(0, 5):state() == "none")
+merchantOpen = true; fire("MERCHANT_SHOW")
+check("the vanished stack's leftover mark is cleaned up, and nothing is offered for sale", JunkMarkDB.marked["cloth-C"] == nil and JunkMarkSellButton.text == "Sell Junk (0)")
+merchantOpen = false; fire("MERCHANT_CLOSED")
+relog()
+check("final state survives login: one favorite stack, nothing else marked", kind("cloth-B") == "favorite" and kind("cloth-A") == nil and kind("sword-B") == nil and btn(0, 3):state() == "favorite" and btn(0, 4):state() == "none" and btn(0, 1):state() == "none")
+
 io.write(fails == 0 and "ALL PASSED\n" or (fails .. " FAILED\n")); os.exit(fails == 0 and 0 or 1)
