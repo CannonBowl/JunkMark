@@ -9,7 +9,7 @@ JunkMark is an addon for World of Warcraft: Forever that marks bag items the way
 - Mark any bag item with one key while hovering it: junk, favorite, or none
 - Marks belong to the individual item, so marking one of two identical swords leaves the other alone
 - Sell all junk at a vendor with one click, or automatically when a vendor opens
-- Junk your character can disenchant is queued for disenchanting instead, one item per click or key press
+- Junk your character can disenchant can be queued for disenchanting instead, one item per click or key press
 - Favorites are blocked from being sold while a vendor is open
 - Overlay icons in your bags show what each marked item is and where it is headed
 - Refundable items are never sold, and a sale only counts once the item has left your bags
@@ -40,11 +40,11 @@ Hover an item in your bags and press **Space**:
 - Space is only taken over while the cursor is on a bag item. Everywhere else it still jumps.
 - It does not work during combat, because the game does not let addons change key bindings in combat.
 - An item that can be neither sold nor used by a profession skips junk and goes straight to favorite.
-- An item your character can disenchant **and** a vendor will buy has two junk steps: the first press queues it for disenchanting (purple, with the ability's icon), the second makes it plain vendor junk (coin), and the third makes it a favorite.
+- An item your character can disenchant **and** a vendor will buy has two junk steps: the first press makes it vendor junk (coin), the second queues it for disenchanting instead (purple, with the ability's icon), and the third makes it a favorite.
 
 ## Junk
 
-You only ever mark junk. Where it goes depends on your character and the item.
+Junk goes to a vendor unless you send it to a profession. Which of the two an item can go to depends on your character and the item.
 
 ### Selling
 
@@ -56,16 +56,16 @@ A **Sell Junk (N)** button appears below the bottom-right corner of the vendor w
 
 ### Disenchanting
 
-If your character knows an ability that uses an item up, junk it applies to is queued for that ability instead of being sold. Currently that is Disenchant, for uncommon-to-epic weapons and armor. Queued junk is tinted purple with the ability's icon.
+If your character knows an ability that uses an item up, junk it applies to can be queued for that ability instead of being sold: press Space a second time on the item. Currently that is Disenchant, for uncommon-to-epic weapons and armor. Queued junk is tinted purple with the ability's icon. Gear a vendor will not buy is queued on the first press, since nothing else can be done with it.
 
 - A small movable panel shows the next item and how many are queued. Click the icon to process that item.
 - The game requires a real click or key press for every spell cast, so the queue cannot run by itself.
 - Items are processed in the order you marked them.
-- To sell an item instead of disenchanting it, press Space on it once more in your bags, or right-click the icon while it is next in the queue.
+- Right-click the icon to send that item back to the vendor pile.
 - Shift-click **Sell Junk** to sell the queued items too.
 - The queue pauses during combat.
 
-A character with no such ability sells all junk. Learning one later re-routes existing junk automatically.
+A character with no such ability sells all junk. Junk marked for the vendor stays vendor junk if the ability is learned later.
 
 ## Favorites
 

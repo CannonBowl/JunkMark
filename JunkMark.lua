@@ -390,8 +390,8 @@ end
 
 -- Steps an item through: unmarked -> junk -> favorite -> unmarked.
 -- Junk is skipped for an item that can be neither sold nor used by a profession.
--- Junk that a profession can use and a vendor will also buy takes two steps: first
--- queued for the profession, then plain vendor junk, so the player can pick either.
+-- Junk that a vendor will buy and a profession can also use takes two steps: first
+-- plain vendor junk, then queued for the profession, so the player can pick either.
 function CycleSlot(bag, slot)
 	local guid = GetSlotGUID(bag, slot);
 	local info = guid and C_Container.GetContainerItemInfo(bag, slot);
@@ -406,15 +406,19 @@ function CycleSlot(bag, slot)
 
 	local nextKind, sellOnly;
 	if current == KIND_JUNK then
-		if hasAction and canSell and not mark.sellOnly then
-			nextKind, sellOnly = KIND_JUNK, true;
+		if mark.sellOnly and hasAction then
+			nextKind = KIND_JUNK;
 		else
 			nextKind = KIND_FAVORITE;
 		end
 	elseif current == KIND_FAVORITE then
 		nextKind = nil;
+	elseif canSell then
+		-- Always sellOnly, even with no profession to hold the item back from: junk the
+		-- player marked for the vendor stays vendor junk if a profession is learned later.
+		nextKind, sellOnly = KIND_JUNK, true;
 	else
-		nextKind = (canSell or hasAction) and KIND_JUNK or KIND_FAVORITE;
+		nextKind = hasAction and KIND_JUNK or KIND_FAVORITE;
 	end
 
 	SetMark(guid, nextKind, sellOnly);

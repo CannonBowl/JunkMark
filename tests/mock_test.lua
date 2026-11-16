@@ -181,7 +181,7 @@ press(1, 2); check("unsellable non-gear skips junk: none -> favorite", kind("que
 press(1, 2); check("...and favorite -> none", kind("questjunk") == nil)
 
 -- smart routing for an enchanter
-press(0, 1); press(0, 3); press(1, 1)
+press(0, 1); press(0, 3, 2); press(1, 1)
 check("gray weapon junk goes to the vendor pile", btn(0, 1):state() == "sell")
 check("green armor junk is routed to disenchant", btn(0, 3):state() == "queue" and btn(0, 3).textures[3].tex == "spellicon:13262")
 check("unsellable gear can still be junk, for disenchanting", kind("questring") == "junk" and btn(1, 1):state() == "queue")
@@ -190,9 +190,9 @@ check("queue is first-marked first (migrated staff, then helm, then ring)", B.he
 
 -- favorites at the vendor
 -- gear a vendor will also buy steps through both kinds of junk before favorite
-press(1, 3); check("Space on sellable gear: none -> junk, queued for disenchant", kind("heirloom") == "junk" and btn(1, 3):state() == "queue" and JunkMarkDB.marked.heirloom.sellOnly == nil)
-press(1, 3); check("...-> junk for the vendor instead", kind("heirloom") == "junk" and btn(1, 3):state() == "sell" and JunkMarkDB.marked.heirloom.sellOnly == true)
-press(1, 3); check("...-> favorite, with the vendor-only flag gone", kind("heirloom") == "favorite" and btn(1, 3):state() == "favorite" and JunkMarkDB.marked.heirloom.sellOnly == nil)
+press(1, 3); check("Space on sellable gear: none -> junk for the vendor", kind("heirloom") == "junk" and btn(1, 3):state() == "sell" and JunkMarkDB.marked.heirloom.sellOnly == true)
+press(1, 3); check("...-> junk queued for disenchant instead, vendor-only flag gone", kind("heirloom") == "junk" and btn(1, 3):state() == "queue" and JunkMarkDB.marked.heirloom.sellOnly == nil)
+press(1, 3); check("...-> favorite", kind("heirloom") == "favorite" and btn(1, 3):state() == "favorite" and JunkMarkDB.marked.heirloom.sellOnly == nil)
 check("no click blocker away from a vendor", not btn(1, 3):blocked())
 JunkMarkDB.marked.banked = { kind = "favorite", order = 99 }; JunkMarkDB.marked.gone = { kind = "junk", order = 98 }
 merchantOpen = true; fire("MERCHANT_SHOW")
@@ -230,14 +230,14 @@ check("blocker lifted when the vendor closes", not btn(1, 3):blocked())
 
 -- combat
 put(0, 5, "greenboots", 200, { quality = 2, class = 4 }); put(0, 6, "greenbelt", 150, { quality = 2, class = 4 })
-press(0, 5)
+press(0, 5, 2)
 hover(btn(0, 6)); fire("PLAYER_REGEN_DISABLED"); inCombat = true
 check("entering combat releases Space and disarms the queue button", next(override) == nil and B.attrs.type1 == nil)
 check("Space does nothing on hover during combat", not space())
 unhover(btn(0, 6)); hover(btn(0, 5)); unhover(btn(0, 5)); hover(btn(0, 6))
 inCombat = false; fire("PLAYER_REGEN_ENABLED")
 check("after combat Space works again on the item still hovered", override.SPACE == "JUNKMARK_TOGGLE" and B.attrs.type1 == "spell" and B.head.guid == "greenboots")
-space(); unhover(btn(0, 6))
+space(); space(); unhover(btn(0, 6))
 check("queue grows in mark order", kind("greenbelt") == "junk" and B.head.guid == "greenboots" and P.countText.text == "2 items queued")
 bags[0][5] = nil; fire("BAG_UPDATE_DELAYED")
 check("queue advances after a disenchant", B.head.guid == "greenbelt" and B.attrs["target-slot1"] == 6)
@@ -246,11 +246,14 @@ check("queue advances after a disenchant", B.head.guid == "greenbelt" and B.attr
 knowsDE = false; fire("SPELLS_CHANGED")
 check("without Disenchant the same junk goes to the vendor pile", btn(0, 6):state() == "sell" and not P.shown and B.attrs.type1 == nil)
 put(0, 7, "greencloak", 120, { quality = 2, class = 4 }); fire("BAG_UPDATE_DELAYED")
-press(0, 7); check("without Disenchant, gear is plain vendor junk", kind("greencloak") == "junk" and btn(0, 7):state() == "sell" and JunkMarkDB.marked.greencloak.sellOnly == nil)
+press(0, 7); check("without Disenchant, gear is vendor junk", kind("greencloak") == "junk" and btn(0, 7):state() == "sell")
 press(0, 7); check("...and has no second junk step: junk -> favorite", kind("greencloak") == "favorite")
-press(0, 7); bags[0][7] = nil; fire("BAG_UPDATE_DELAYED")
+press(0, 7, 2); check("(cloak marked for the vendor again)", kind("greencloak") == "junk" and btn(0, 7):state() == "sell")
 knowsDE = true; fire("SPELLS_CHANGED")
-check("learning Disenchant re-routes existing junk", btn(0, 6):state() == "queue" and P.shown)
+check("learning Disenchant puts junk that was queued back in the queue", btn(0, 6):state() == "queue" and P.shown)
+check("...but junk marked for the vendor stays vendor junk", btn(0, 7):state() == "sell" and P.countText.text == "1 item queued")
+press(0, 7); check("...until Space sends it to the queue", btn(0, 7):state() == "queue" and P.countText.text == "2 items queued")
+press(0, 7, 2); bags[0][7] = nil; fire("BAG_UPDATE_DELAYED")
 
 -- gear a vendor won't buy can only be disenchanted, so it has no vendor step either
 put(0, 7, "boundring", 0, { quality = 2, class = 4, noValue = true }); fire("BAG_UPDATE_DELAYED")
@@ -259,10 +262,8 @@ press(0, 7); check("...-> favorite, skipping the vendor step", kind("boundring")
 press(0, 7); bags[0][7] = nil; fire("BAG_UPDATE_DELAYED")
 
 -- a key the player bound themselves works without the hover binding
-foci = { btn(0, 6) }; JunkMark_ToggleHovered()
-check("user-bound key cycles the item under the cursor", kind("greenbelt") == "junk" and btn(0, 6):state() == "sell" and not P.shown)
-JunkMark_ToggleHovered(); foci = {}
-check("...and again, on to favorite", kind("greenbelt") == "favorite")
+foci = { btn(0, 6) }; JunkMark_ToggleHovered(); foci = {}
+check("user-bound key cycles the item under the cursor", kind("greenbelt") == "favorite" and not P.shown)
 
 merchantOpen = true; fire("MERCHANT_SHOW"); JunkMarkDB.autoSell = true
 SlashCmdList.JUNKMARK("sell all"); pump(2)
