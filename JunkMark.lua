@@ -141,9 +141,9 @@ local function Print(message)
 	print(CHAT_PREFIX .. message);
 end
 
--- A short trace of what the queue button and the mark key did, kept in the saved data
--- (the last TRACE_LINES lines). It is how "I clicked and X happened" gets checked
--- against what the addon actually saw; nothing reads it back.
+-- A short trace of what the queue button, the mark key, a sale and a favorite prune
+-- did, kept in the saved data (the last TRACE_LINES lines). It is how "I clicked and X
+-- happened" gets checked against what the addon actually saw; nothing reads it back.
 local TRACE_LINES = 80;
 local function Trace(...)
 	if not db then
@@ -845,24 +845,48 @@ end
 -- dropped only if the item is in none of bags, bank and worn gear AND the game itself
 -- says the character no longer holds it. If either look fails, the mark is kept.
 local function PruneFavorites()
-	if not db or not bankOpen or not C_Item.IsItemGUIDInInventory then
+	if not db then
+		return;
+	end
+	-- Every way out leaves a trace line: a prune that drops nothing says nothing in
+	-- chat, and "it looked and kept everything" must not read like "it never ran".
+	if not bankOpen then
+		Trace("prune: skipped, the bank closed before it could be read");
+		return;
+	end
+	if not C_Item.IsItemGUIDInInventory then
+		Trace("prune: skipped, this client has no C_Item.IsItemGUIDInInventory");
 		return;
 	end
 	local stored, bankSlots = GetStoredGUIDs();
 	if bankSlots == 0 then
+		Trace("prune: skipped, the bank read as 0 slots");
 		return;
 	end
 	local present = GetBagGUIDs();
-	local dropped = 0;
+	local favorites, inBags, inBankOrWorn, heldElsewhere, unsure, dropped = 0, 0, 0, 0, 0, 0;
 	for guid, mark in pairs(db.marked) do
-		if mark.kind == KIND_FAVORITE and not present[guid] and not stored[guid] then
-			local ok, held = pcall(C_Item.IsItemGUIDInInventory, guid);
-			if ok and held == false then
-				db.marked[guid] = nil;
-				dropped = dropped + 1;
+		if mark.kind == KIND_FAVORITE then
+			favorites = favorites + 1;
+			if present[guid] then
+				inBags = inBags + 1;
+			elseif stored[guid] then
+				inBankOrWorn = inBankOrWorn + 1;
+			else
+				local ok, held = pcall(C_Item.IsItemGUIDInInventory, guid);
+				if ok and held == false then
+					db.marked[guid] = nil;
+					dropped = dropped + 1;
+				elseif ok and held then
+					heldElsewhere = heldElsewhere + 1;
+				else
+					unsure = unsure + 1;
+				end
 			end
 		end
 	end
+	Trace(string.format("prune: %d bank slots read, %d favorites: %d in bags, %d in bank or worn, %d held elsewhere per the game, %d unsure, %d dropped",
+		bankSlots, favorites, inBags, inBankOrWorn, heldElsewhere, unsure, dropped));
 	if dropped > 0 then
 		Print(string.format("Removed %d favorite mark%s for item%s you no longer have.", dropped, Plural(dropped), Plural(dropped)));
 	end
@@ -933,6 +957,7 @@ local function FinishSelling()
 		end
 	end
 
+	Trace(string.format("sale: %d sent, %d sold for %d copper, %d still in the bags%s", #run.sent, sold, earned, unsold, merchantOpen and "" or " (vendor closed)"));
 	if sold > 0 then
 		Print(string.format("Sold %d item%s for %s.", sold, Plural(sold), FormatMoney(earned)));
 	end
@@ -990,7 +1015,9 @@ local function SellJunk(includeHeld)
 		return;
 	end
 
-	local queue, _, _, refundableCount = CollectJunk(includeHeld);
+	local queue, totalValue, heldCount, refundableCount = CollectJunk(includeHeld);
+	Trace(string.format("sale: %d to send worth %d copper%s, %d kept for a profession, %d refundable left alone",
+		#queue, totalValue, includeHeld and " (queued items included)" or "", heldCount, refundableCount));
 	if refundableCount > 0 then
 		Print(string.format("Left %d junk item%s alone because you can still return %s for a refund.", refundableCount, Plural(refundableCount), refundableCount == 1 and "it" or "them"));
 	end
@@ -1626,6 +1653,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 		RefreshAllBags(); -- puts the click blockers on favorites
 		UpdateSellButton();
 		if db.autoSell then
+			Trace("vendor opened with auto-sell on");
 			SellJunk(false);
 		end
 	elseif event == "MERCHANT_CLOSED" then
@@ -1637,6 +1665,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 	elseif event == "BANKFRAME_OPENED" then
 		-- Not straight away: the bank's contents arrive just after it opens.
 		bankOpen = true;
+		Trace("bank opened");
 		C_Timer.After(BANK_SETTLE_SECONDS, PruneFavorites);
 	elseif event == "BANKFRAME_CLOSED" then
 		bankOpen = false;
