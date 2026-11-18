@@ -15,8 +15,9 @@
 -- green sword does not mark the next one that drops. A mark follows the item when
 -- bags are sorted and survives relogging.
 
--- The addon's folder name, as the game passes it to every file in the addon.
-local addonName = ...;
+-- The addon's folder name and its private table, as the game passes them to every
+-- file in the addon. The table is how this file shares functions with OtherAddons.lua.
+local addonName, ns = ...;
 
 BINDING_HEADER_JUNKMARK = "JunkMark";
 BINDING_NAME_JUNKMARK_TOGGLE = "Cycle mark on hovered item";
@@ -127,6 +128,7 @@ local overlays = setmetatable({}, { __mode = "k" }); -- bag item button -> textu
 local blockers = setmetatable({}, { __mode = "k" }); -- bag item button -> click blocker
 local blockerOwners = setmetatable({}, { __mode = "k" }); -- click blocker -> bag item button
 local hookedButtons = setmetatable({}, { __mode = "k" }); -- every bag item button seen so far
+local favoriteItemIDs; -- item IDs with a favorite in the bags; nil when it needs rebuilding
 local scratchLocation = ItemLocation:CreateEmpty();
 local merchantOpen = false;
 local sellRun; -- the sale in progress: { queue, sent, settleTicks }
@@ -162,6 +164,22 @@ end
 
 local function Plural(count)
 	return count == 1 and "" or "s";
+end
+
+-- Functions that OtherAddons.lua, and other addons, have asked to be told about:
+--   login     - once, at PLAYER_LOGIN, when every enabled addon has loaded
+--   favorited - an item was just marked favorite (bag, slot, container item info)
+--   changed   - a mark was added, changed or removed (JunkMarkAPI.OnChanged)
+-- Each call is protected, so one listener's error cannot stop the others or JunkMark.
+local listeners = { login = {}, favorited = {}, changed = {} };
+
+local function Fire(list, ...)
+	for _, func in ipairs(listeners[list]) do
+		local ok, problem = pcall(func, ...);
+		if not ok then
+			geterrorhandler()(problem);
+		end
+	end
 end
 
 local function GetSlotGUID(bag, slot)
@@ -424,6 +442,18 @@ local function UpdateButtonOverlay(button)
 	overlay.star:SetShown(isFavorite);
 end
 
+-- Removes everything JunkMark drew on a button, whatever its slot holds.
+local function HideButtonOverlay(button)
+	UpdateBlocker(button, false);
+	local overlay = overlays[button];
+	if overlay then
+		overlay.shade:Hide();
+		overlay.coin:Hide();
+		overlay.action:Hide();
+		overlay.star:Hide();
+	end
+end
+
 local function RefreshContainerFrame(frame)
 	if not db or not frame:IsShown() then
 		return;
@@ -468,18 +498,41 @@ end
 --
 -- What differs is finding the buttons: there is no shared list and they are created
 -- lazily. JunkMark notices a window the first time the cursor rests on one of its
--- item buttons, then follows that window. Nothing is hooked on the buttons beyond
--- script hooks; a button being reused for another slot (sorting, categories) is
--- caught by comparing what each visible button holds against what was last drawn.
+-- item buttons, then follows that window. A few windows and buttons are also known
+-- by name (KNOWN_WINDOWS, KNOWN_BUTTON_NAMES), so those need no first hover.
+--
+-- A button is reused for another slot whenever its addon sorts, filters or changes
+-- category, and no game event says so. But the addon has to give the button the new
+-- item's icon, and every way of doing that ends in SetTexture or SetAtlas on the
+-- button's icon (SetItemButtonTexture_Base, Blizzard_ItemButton/Mainline/
+-- ItemButtonTemplate.lua). Those two calls are hooked on each button adopted, and
+-- the mark is redrawn there and then, in the same frame as the icon. Comparing what
+-- each visible button holds against what was last drawn, a few times a second, is
+-- kept as a backstop for a button with no icon to hook.
 --------------------------------------------------------------------------------
 
 local WATCH_INTERVAL = 0.1; -- seconds between looks at what is under the cursor
 local RECHECK_TICKS = 3; -- every this many looks, visible buttons are compared too
 local PARENT_CLIMB = 3; -- the cursor may be on a child frame of the item button
 
+-- Bag windows with a fixed global name, followed as soon as they exist. Other windows
+-- are remembered by name once the cursor has found them (db.bagWindows).
+--   ElvUI_ContainerFrame: ElvUI's bags, read at its development version of 2026-11-17.
+--   EUI_MainBagFrame, EUI_ReagentBagFrame: EllesmereUI Bags, read at 9.8.9.
+local KNOWN_WINDOWS = { "ElvUI_ContainerFrame", "EUI_MainBagFrame", "EUI_ReagentBagFrame" };
+
+-- Item buttons with numbered global names, adopted as they come into existence.
+--   BetterBags, read at its development version of 2026-11-18: each button's parent
+--   is a frame of its own outside the bag window, so no window leads to them.
+--   Bagnon, read at 12.1.12: named after the folder its core is in, which has been
+--   both BagBrother and Bagnon.
+local KNOWN_BUTTON_NAMES = { "BetterBagsItemButton%d", "BetterBagsRowItemButton%d", "BagBrotherContainerItem%d", "BagnonContainerItem%d" };
+
 local foreignWindows = setmetatable({}, { __mode = "k" }); -- top-level bag window -> true
 local foreignButtons = setmetatable({}, { __mode = "k" }); -- item button -> GUID last drawn, or false
 local buttonVerdicts = setmetatable({}, { __mode = "k" }); -- frame -> is it a bag item button
+local repainted = {}; -- buttons whose icon was set since the last frame
+local nextNamed = {}; -- button name pattern -> the next number to try
 local foreignRefreshQueued = false;
 
 -- A button made from Blizzard's bag item template. Bag-bar slot buttons and others
@@ -495,9 +548,19 @@ local function IsBagItemButton(frame)
 	return verdict;
 end
 
+-- Bagnon can show another character's bags in the same window, on the same buttons.
+-- Their slot numbers then say nothing about this character's items. IsCached is
+-- Bagnon's own test for that (BagBrother/core/classes/containerItem.lua).
+local function ShowsAnotherCharacter(button)
+	return type(button.IsCached) == "function" and button:IsCached() == true;
+end
+
 -- The button's slot if it is in the player's bags. The same template is used for
 -- bank slots, which JunkMark does not mark.
 local function GetPlayerBagSlot(button)
+	if ShowsAnotherCharacter(button) then
+		return nil;
+	end
 	local bag, slot = button:GetBagID(), button:GetID();
 	if type(bag) == "number" and bag >= 0 and bag <= (NUM_TOTAL_BAG_FRAMES or 4) and slot and slot >= 1 then
 		return bag, slot;
@@ -528,9 +591,35 @@ local function ForeignEnter(button)
 	end
 end
 
+-- The GUID of the item a button of theirs shows, or false for none.
+local function GetForeignGUID(button)
+	if ShowsAnotherCharacter(button) then
+		return false;
+	end
+	return GetSlotGUID(button:GetBagID(), button:GetID()) or false;
+end
+
 local function DrawForeignButton(button)
-	foreignButtons[button] = GetSlotGUID(button:GetBagID(), button:GetID()) or false;
-	UpdateButtonOverlay(button);
+	foreignButtons[button] = GetForeignGUID(button);
+	if ShowsAnotherCharacter(button) then
+		HideButtonOverlay(button);
+	else
+		UpdateButtonOverlay(button);
+	end
+end
+
+-- A button's icon was just set, so it may now stand for another slot. Every bag
+-- addon read sets the button's slot before its icon, so the mark is right if drawn
+-- now. It is drawn once more when the frame's other work is done (the watcher
+-- below), for an addon that does it the other way round.
+local function OnForeignRepainted(button)
+	if not db then
+		return;
+	end
+	if button:IsVisible() then
+		DrawForeignButton(button);
+	end
+	repainted[button] = true;
 end
 
 local function AdoptForeignButton(button)
@@ -542,6 +631,41 @@ local function AdoptForeignButton(button)
 	button:HookScript("OnEnter", ForeignEnter);
 	button:HookScript("OnLeave", HoverLeave);
 	button:HookScript("OnHide", HoverLeave);
+
+	local icon = button.icon or button.Icon;
+	if type(icon) == "table" and type(icon.SetTexture) == "function" and type(icon.SetAtlas) == "function" then
+		local function Repainted()
+			OnForeignRepainted(button);
+		end
+		hooksecurefunc(icon, "SetTexture", Repainted);
+		hooksecurefunc(icon, "SetAtlas", Repainted);
+	end
+end
+
+-- Adopts the buttons that are known by numbered global names, from where the last
+-- call stopped. Returns whether there were new ones.
+local function AdoptNamedButtons()
+	local adoptedAny = false;
+	for _, pattern in ipairs(KNOWN_BUTTON_NAMES) do
+		-- Numbering starts at 0 in BetterBags and at 1 in Bagnon.
+		local first = nextNamed[pattern] or (_G[pattern:format(0)] and 0 or 1);
+		local index = first;
+		local frame = _G[pattern:format(index)];
+		while frame do
+			if type(frame) == "table" and type(frame.IsForbidden) == "function" and IsBagItemButton(frame) and not hookedButtons[frame] then
+				AdoptForeignButton(frame);
+				adoptedAny = true;
+			end
+			index = index + 1;
+			frame = _G[pattern:format(index)];
+		end
+		-- Remembered only once something was found: until then it is not known
+		-- whether the numbering starts at 0 or 1.
+		if index > first then
+			nextNamed[pattern] = index;
+		end
+	end
+	return adoptedAny;
 end
 
 -- Adopts every bag item button under a frame. Hidden ones are adopted too, since a
@@ -567,6 +691,7 @@ local function RefreshForeignButtons()
 	if not db then
 		return;
 	end
+	AdoptNamedButtons();
 	for window in pairs(foreignWindows) do
 		if window:IsShown() then
 			CollectForeignButtons(window, 0);
@@ -583,7 +708,7 @@ end
 -- delay lets the bag addon finish its own update first: on a bag event JunkMark may
 -- be told before the addon has moved its buttons to their new slots.
 local function QueueForeignRefresh()
-	if not foreignRefreshQueued and next(foreignWindows) then
+	if not foreignRefreshQueued and (next(foreignWindows) or next(foreignButtons)) then
 		foreignRefreshQueued = true;
 		C_Timer.After(0, RefreshForeignButtons);
 	end
@@ -625,25 +750,49 @@ end
 -- every look until each name has turned up. Without it a window would show no marks
 -- after a login or /reload until the cursor first touched one of its items.
 local rememberedFound = {}; -- window name -> followed this session
+
+-- Follows the window of that name if it exists by now. Returns whether it is new.
+local function FollowNamedWindow(name)
+	if rememberedFound[name] then
+		return false;
+	end
+	local window = _G[name];
+	if type(window) == "table" and type(window.IsForbidden) == "function" and not window:IsForbidden()
+		and type(window.HookScript) == "function" and type(window.GetChildren) == "function" then
+		rememberedFound[name] = true;
+		if not IsDefaultBagFrame(window) and not foreignWindows[window] then
+			foreignWindows[window] = true;
+			window:HookScript("OnShow", OnForeignWindowShown);
+			return true;
+		end
+	end
+	return false;
+end
+
 local function FollowRememberedWindows()
 	local found = false;
 	for name in pairs(db.bagWindows or {}) do
-		if not rememberedFound[name] then
-			local window = _G[name];
-			if type(window) == "table" and type(window.IsForbidden) == "function" and not window:IsForbidden()
-				and type(window.HookScript) == "function" and type(window.GetChildren) == "function" then
-				rememberedFound[name] = true;
-				if not IsDefaultBagFrame(window) and not foreignWindows[window] then
-					foreignWindows[window] = true;
-					window:HookScript("OnShow", OnForeignWindowShown);
-					found = true;
-				end
-			end
-		end
+		found = FollowNamedWindow(name) or found;
+	end
+	for _, name in ipairs(KNOWN_WINDOWS) do
+		found = FollowNamedWindow(name) or found;
 	end
 	if found then
 		OnForeignWindowShown();
 	end
+end
+
+-- Redraws the buttons whose icon was set during the frame, now that whatever set
+-- them has finished.
+local function FlushRepainted()
+	for button in pairs(repainted) do
+		repainted[button] = nil;
+		if button:IsVisible() then
+			DrawForeignButton(button);
+		end
+	end
+	-- The slot under a resting cursor may have filled or emptied.
+	ApplyHoverKey();
 end
 
 -- Redraws any visible button whose slot now holds a different item than was drawn.
@@ -651,7 +800,7 @@ local function RecheckForeignButtons()
 	local changed = false;
 	for button, drawn in pairs(foreignButtons) do
 		if button:IsVisible() then
-			local guid = GetSlotGUID(button:GetBagID(), button:GetID()) or false;
+			local guid = GetForeignGUID(button);
 			if guid ~= drawn then
 				DrawForeignButton(button);
 				changed = true;
@@ -690,6 +839,11 @@ end
 local watcher = CreateFrame("Frame");
 local sinceWatch, watchTicks = 0, 0;
 watcher:SetScript("OnUpdate", function(_, elapsed)
+	-- Every frame, and cheap when nothing was repainted.
+	if next(repainted) then
+		FlushRepainted();
+	end
+
 	sinceWatch = sinceWatch + elapsed;
 	if sinceWatch < WATCH_INTERVAL or not db then
 		return;
@@ -700,6 +854,9 @@ watcher:SetScript("OnUpdate", function(_, elapsed)
 	watchTicks = watchTicks + 1;
 	if watchTicks >= RECHECK_TICKS then
 		watchTicks = 0;
+		if AdoptNamedButtons() then
+			RefreshForeignButtons();
+		end
 		RecheckForeignButtons();
 	end
 end);
@@ -710,9 +867,11 @@ local function RefreshAllBags()
 end
 
 local function OnMarksChanged()
+	favoriteItemIDs = nil;
 	RefreshAllBags();
 	UpdateSellButton();
 	UpdateQueuePanel();
+	Fire("changed");
 end
 
 --------------------------------------------------------------------------------
@@ -767,6 +926,9 @@ function CycleSlot(bag, slot)
 	SetMark(guid, nextKind, sellOnly);
 	PlaySound(nextKind and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF);
 	OnMarksChanged();
+	if nextKind == KIND_FAVORITE then
+		Fire("favorited", bag, slot, info);
+	end
 end
 
 -- Key binding target (Bindings.xml), also what the hover key is pointed at.
@@ -1365,8 +1527,127 @@ function UpdateQueuePanel()
 end
 
 --------------------------------------------------------------------------------
+-- For OtherAddons.lua, and for other addons
+--
+-- Other junk addons decide by item ID, so they cannot tell a favorite from another
+-- copy of the same item. IsItemIDFavorite answers for the ID as a whole: while one
+-- copy in the bags is a favorite, every copy counts as protected.
+--------------------------------------------------------------------------------
+
+-- The mark on the item in a bag slot: "junk", "favorite", or nil.
+local function GetSlotMarkKind(bag, slot)
+	local guid = db and GetSlotGUID(bag, slot);
+	local mark = guid and db.marked[guid];
+	local kind = mark and mark.kind;
+	if kind == KIND_JUNK or kind == KIND_FAVORITE then
+		return kind;
+	end
+	return nil;
+end
+
+-- Calls callback(bag, slot) for every favorite in the bags.
+local function ForEachFavorite(callback)
+	if not db then
+		return;
+	end
+	ForEachBagItem(function(bag, slot, guid)
+		local mark = db.marked[guid];
+		if mark and mark.kind == KIND_FAVORITE then
+			callback(bag, slot);
+		end
+	end);
+end
+
+local function IsItemIDFavorite(itemID)
+	if not db or not itemID then
+		return false;
+	end
+	if not favoriteItemIDs then
+		favoriteItemIDs = {};
+		ForEachFavorite(function(bag, slot)
+			local info = C_Container.GetContainerItemInfo(bag, slot);
+			if info and info.itemID then
+				favoriteItemIDs[info.itemID] = true;
+			end
+		end);
+	end
+	return favoriteItemIDs[itemID] == true;
+end
+
+ns.KIND_JUNK = KIND_JUNK;
+ns.KIND_FAVORITE = KIND_FAVORITE;
+ns.Print = Print;
+ns.GetSlotMarkKind = GetSlotMarkKind;
+ns.ForEachFavorite = ForEachFavorite;
+ns.IsItemIDFavorite = IsItemIDFavorite;
+ns.checks = {}; -- functions that each add lines to the /jm check report
+
+function ns.On(list, func)
+	table.insert(listeners[list], func);
+end
+
+-- What other addons may call. Every function is safe at any time and returns nil or
+-- false before JunkMark's saved marks have loaded. Bags and slots are the game's own
+-- numbers, as passed to C_Container. Keep these stable; add new ones and raise version.
+JunkMarkAPI = { version = 1 };
+
+-- "junk", "favorite", or nil for an unmarked item or an empty slot.
+function JunkMarkAPI.GetMark(bag, slot)
+	return GetSlotMarkKind(bag, slot);
+end
+
+function JunkMarkAPI.IsJunk(bag, slot)
+	return GetSlotMarkKind(bag, slot) == KIND_JUNK;
+end
+
+function JunkMarkAPI.IsFavorite(bag, slot)
+	return GetSlotMarkKind(bag, slot) == KIND_FAVORITE;
+end
+
+-- Whether any copy of this item in the bags is a favorite.
+function JunkMarkAPI.IsItemFavorite(itemID)
+	return IsItemIDFavorite(itemID);
+end
+
+-- Calls func, with no arguments, whenever a mark is added, changed or removed.
+function JunkMarkAPI.OnChanged(func)
+	if type(func) == "function" then
+		ns.On("changed", func);
+	end
+end
+
+--------------------------------------------------------------------------------
 -- Slash commands
 --------------------------------------------------------------------------------
+
+-- /jm check: which bag windows are being followed, and what OtherAddons.lua found
+-- and did about other addons that sell junk.
+local function PrintCheck()
+	local lines = {};
+	local names = {};
+	for window in pairs(foreignWindows) do
+		names[#names + 1] = window:GetName() or "(a window with no name)";
+	end
+	table.sort(names);
+	local named = 0;
+	for button in pairs(foreignButtons) do
+		named = named + 1;
+	end
+	if #names > 0 then
+		lines[#lines + 1] = string.format("Bag addons: following %s (%d item buttons).", table.concat(names, ", "), named);
+	elseif named > 0 then
+		lines[#lines + 1] = string.format("Bag addons: %d item buttons found by name.", named);
+	else
+		lines[#lines + 1] = "Bag addons: none seen yet. Another bag addon is picked up the first time you hover an item in its window.";
+	end
+	for _, addLines in ipairs(ns.checks) do
+		addLines(lines);
+	end
+	Print("How JunkMark is working with your other addons:");
+	for _, line in ipairs(lines) do
+		print("  " .. line);
+	end
+end
 
 -- Prints the character's professions with the abilities each one puts in the
 -- spellbook, then how junk is routed on this character.
@@ -1515,6 +1796,8 @@ SlashCmdList["JUNKMARK"] = function(message)
 		Print("Auto-sell when a vendor opens is now " .. (db.autoSell and "|cff40ff40on|r" or "|cffff4040off|r") .. ".");
 	elseif command == "professions" or command == "prof" then
 		PrintProfessions();
+	elseif command == "check" then
+		PrintCheck();
 	elseif command == "debug" then
 		WriteDebugDump();
 	elseif command == "forget" then
@@ -1542,6 +1825,7 @@ SlashCmdList["JUNKMARK"] = function(message)
 		print("  /jm professions - show your professions and how junk is routed");
 		print("  /jm corner      - show or set which corner of an item the mark icon sits in");
 		print("  /jm forget      - forget which items the game refused to disenchant");
+		print("  /jm check       - show how JunkMark is working with your other addons");
 		print("  /jm debug       - write details of junk-marked items to the saved data, for a bug report");
 		print("  /jm clear       - remove every mark");
 	end
@@ -1613,6 +1897,8 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 		ForEachContainerFrame(function(frame)
 			hooksecurefunc(frame, "UpdateItems", RefreshContainerFrame);
 		end);
+		-- Every enabled addon has loaded by now, so OtherAddons.lua can look for them.
+		Fire("login");
 	elseif event == "MERCHANT_SHOW" then
 		merchantOpen = true;
 		if not sellButton then
@@ -1641,6 +1927,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 	elseif event == "BANKFRAME_CLOSED" then
 		bankOpen = false;
 	elseif event == "BAG_UPDATE_DELAYED" then
+		favoriteItemIDs = nil;
 		QueueForeignRefresh();
 		ApplyHoverKey();
 		UpdateSellButton();

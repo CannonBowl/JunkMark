@@ -2,13 +2,20 @@
 -- WoW API. The game never loads this file (it is not listed in JunkMark.toc).
 --
 -- Run from the addon folder:
---     lua tests/mock_test.lua JunkMark.lua
+--     lua tests/mock_test.lua
+-- It loads the files JunkMark.toc lists, in that order, the way the game does.
 --
 -- Limits worth knowing: the fake widgets accept any method name, and the fakes encode
 -- assumptions about how the real API behaves, so a pass here shows the addon's logic
 -- is self-consistent, not that it works in the client. The game runs Lua 5.1.
 
-local addonPath = arg[1]
+local files = {}
+for raw in io.lines("JunkMark.toc") do
+  local line = raw:gsub("%s+$", "")
+  if line ~= "" and line:sub(1, 1) ~= "#" then files[#files + 1] = line end
+end
+-- Every file of an addon is passed the addon's folder name and one shared private table.
+local function loadAddon() local ns = {}; for _, path in ipairs(files) do assert(loadfile(path))("RenamedFolder", ns) end end
 local out, errors, fails = {}, {}, 0
 local function check(name, cond) if cond then io.write("ok   ", name, "\n") else fails = fails + 1; io.write("FAIL ", name, "\n") end end
 
@@ -28,10 +35,16 @@ SOUNDKIT = { IG_MAINMENU_OPTION_CHECKBOX_ON = 856, IG_MAINMENU_OPTION_CHECKBOX_O
 PlaySound = function(id) assert(id) end
 SlashCmdList = {}
 NUM_TOTAL_BAG_FRAMES = 1
-Enum = { SpellBookSpellBank = { Player = "PlayerBank" }, ItemQuality = { Uncommon = 2, Epic = 4 }, ItemClass = { Weapon = 2, Armor = 4 },
+Enum = { SpellBookSpellBank = { Player = "PlayerBank" }, ItemQuality = { Poor = 0, Uncommon = 2, Epic = 4 }, ItemClass = { Weapon = 2, Armor = 4 },
   BagIndex = { Keyring = -1, Backpack = 0, Bag_1 = 1, CharacterBankTab_1 = 6, AccountBankTab_1 = 15 } }
 IsShiftKeyDown = function() return shift end
 InCombatLockdown = function() return inCombat end
+-- Which addon folders count as loaded, and the Ace addons that can be looked up by name.
+local loaded, aceAddons = {}, {}
+C_AddOns = { IsAddOnLoaded = function(name) return loaded[name] == true end }
+-- Errors raised inside a protected listener call end up here instead of stopping the addon.
+local caught = {}
+geterrorhandler = function() return function(e) caught[#caught + 1] = tostring(e) end end
 SetOverrideBinding = function(owner, priority, key, command) assert(not inCombat, "SetOverrideBinding in combat"); assert(owner and priority == true); override[key] = command end
 ClearOverrideBindings = function(owner) assert(not inCombat, "ClearOverrideBindings in combat"); assert(owner); override = {} end
 
@@ -165,7 +178,7 @@ put(1, 2, "questjunk", 0, { noValue = true })
 put(1, 3, "heirloom", 5000, { quality = 4, class = 4 })
 
 JunkMarkDB = { marked = { cloth = true, bluestaff = { kind = "disenchant", order = 1 }, mystery = { kind = "keep" }, garbage = 7 }, nextOrder = 1 }
-assert(loadfile(addonPath))("RenamedFolder", {})
+loadAddon()
 local function fire(ev, ...) eventHandler(nil, ev, ...) end
 local function pump(n) pumpRaw(n); fire("BAG_UPDATE_DELAYED") end
 local function kind(g) return JunkMarkDB.marked[g] and JunkMarkDB.marked[g].kind end
@@ -373,7 +386,7 @@ local function relog()
   ContainerFrameCombinedBags.UpdateItems = function() end
   JunkMarkQueuePanel, JunkMarkProcessButton, JunkMarkSellButton = nil, nil, nil
   JunkMarkDB = JunkMarkDB and roundTrip(JunkMarkDB)
-  assert(loadfile(addonPath))("RenamedFolder", {})
+  loadAddon()
   fire("ADDON_LOADED", "RenamedFolder"); fire("PLAYER_LOGIN"); fire("BAG_UPDATE_DELAYED")
   ContainerFrameCombinedBags:UpdateItems()
 end
@@ -503,6 +516,7 @@ end
 local function theirButton(grid, bag, slot)
   local holder = plain(grid)
   local b = button(bag, slot); b.bag, b.slot, b.shown = bag, slot, true
+  b.icon = { SetTexture = function() end, SetAtlas = function() end } -- what their addon paints the item's picture with
   function b:GetBagID() return self.bag end
   function b:GetID() return self.slot end
   function b:GetParent() return holder end
@@ -654,5 +668,189 @@ check("'/jm debug' records each junk-marked item with the facts that decide its 
 local byID = {}; for _, it in ipairs(dump.items) do byID[it.itemID] = it end
 check("...including where it is routed and its tooltip lines", byID[777].routedTo == "Disenchant" and byID[5387].routedTo == "sell" and byID[5387].sellOnly == true and byID[777].classID == 4 and byID[777].quality == 2 and byID[777].tooltip[2] == "Binds when picked up")
 relog(); check("...and the dump survives the trip to disk", #JunkMarkDB.debug.items == 2)
+
+--------------------------------------------------------------------------------
+-- Other bag addons: a mark follows its item with no wait, and some need no hover
+--------------------------------------------------------------------------------
+do
+bags[0], bags[1] = {}, {}; JunkMarkDB = nil; knowsDE = false; money = 0
+relog()
+put(0, 1, "axe", 100, { class = 2 }); put(0, 2, "boots", 60, { class = 4 }); put(0, 3, "gray-tooth", 10, { quality = 0 }); put(0, 4, "ring", 80)
+fire("BAG_UPDATE_DELAYED"); ContainerFrameCombinedBags:UpdateItems()
+press(0, 2); press(0, 4, 2)
+
+local win = plain(UIParent); win.name = "AnotherBagWindow"; local pane = plain(win)
+local R = {}; for slot = 1, 5 do R[slot] = theirButton(pane, 0, slot) end
+foci = { R[1] }; ticks(1); foci = {}; R[1]:run("OnLeave")
+check("(their window is adopted and drawn: boots junk, ring favorite)", R[2]:state() == "sell" and R[4]:state() == "favorite")
+
+-- Their addon sorts. It points each button at its new slot, then paints the new item's icon.
+R[2].slot, R[4].slot = 4, 2; R[2].icon:SetTexture("icon"); R[4].icon:SetTexture("icon")
+check("a button given another slot's icon is redrawn there and then, with no wait", R[2]:state() == "favorite" and R[4]:state() == "sell")
+R[2].slot = 5; R[2].icon:SetAtlas("empty-slot")
+check("a button emptied with an atlas background is redrawn at once too", R[2]:state() == "none")
+R[2].icon:SetTexture("icon"); R[2].slot = 4
+local early = R[2]:state(); onUpdate(nil, 0)
+check("an addon that sets the icon before the slot is put right before the frame is drawn", early == "none" and R[2]:state() == "favorite")
+R[5]:run("OnEnter"); R[5].slot = 1; R[5].icon:SetTexture("icon")
+local beforeFrame = next(override) == nil; onUpdate(nil, 0)
+check("a button under a resting cursor that is given an item takes Space as the frame ends", beforeFrame and override.SPACE == "JUNKMARK_TOGGLE")
+R[5]:run("OnLeave"); R[5].slot = 5
+win.shown = false; R[2].slot = 2; R[2].icon:SetTexture("icon"); onUpdate(nil, 0)
+check("a hidden button is not drawn on", R[2]:state() == "favorite")
+win.shown = true; win:run("OnShow"); nextFrame()
+check("...and is brought up to date when its window is shown", R[2]:state() == "sell")
+
+-- BetterBags and Bagnon give their item buttons numbered global names.
+local bb0, bb1 = theirButton(plain(UIParent), 0, 2), theirButton(plain(UIParent), 0, 4)
+BetterBagsItemButton0, BetterBagsItemButton1 = bb0, bb1
+local cached = false
+local bagnon = theirButton(plain(UIParent), 0, 4); function bagnon:IsCached() return cached end
+BagBrotherContainerItem1 = bagnon
+check("(buttons known by name are untouched until looked for)", not hooked(bb0) and not hooked(bagnon))
+ticks(3)
+check("buttons with numbered names are adopted and drawn with no hover, counting from 0 or from 1", bb0:state() == "sell" and bb1:state() == "favorite" and bagnon:state() == "favorite")
+check("...and none of them is remembered as a window", JunkMarkDB.bagWindows.AnotherBagWindow == true and next(JunkMarkDB.bagWindows, "AnotherBagWindow") == nil)
+BetterBagsItemButton2 = theirButton(plain(UIParent), 0, 2); fire("BAG_UPDATE_DELAYED"); nextFrame()
+check("one created later is picked up at the next bag update", BetterBagsItemButton2:state() == "sell")
+cached = true; bagnon.icon:SetTexture("icon"); bagnon:run("OnEnter")
+check("Bagnon showing another character's bags: nothing is drawn and Space is not taken", bagnon:state() == "none" and next(override) == nil)
+bagnon:run("OnLeave"); cached = false; bagnon.icon:SetTexture("icon")
+check("...and the mark is back when it shows this character's bags again", bagnon:state() == "favorite")
+
+-- ElvUI's bag window has a fixed global name.
+local elv = plain(UIParent); elv.name = "ElvUI_ContainerFrame"; local E1 = theirButton(plain(elv), 0, 2)
+ElvUI_ContainerFrame = elv; ticks(1); nextFrame()
+check("a bag window known by name is followed with no hover, and is not saved as remembered", hooked(E1) and E1:state() == "sell" and JunkMarkDB.bagWindows.ElvUI_ContainerFrame == nil)
+
+-- What other addons can ask, and /jm check with nothing else installed.
+check("the API reads marks by bag and slot", JunkMarkAPI.GetMark(0, 4) == "favorite" and JunkMarkAPI.IsFavorite(0, 4) and JunkMarkAPI.IsJunk(0, 2) and JunkMarkAPI.GetMark(0, 1) == nil and JunkMarkAPI.GetMark(0, 8) == nil)
+check("the API answers by item ID while a copy is a favorite", JunkMarkAPI.IsItemFavorite("ring") and not JunkMarkAPI.IsItemFavorite("axe"))
+local changes = 0
+JunkMarkAPI.OnChanged(function() changes = changes + 1 end)
+JunkMarkAPI.OnChanged(function() error("listener blew up") end)
+press(0, 1)
+check("a mark change reaches listeners, and one that errors stops nothing", changes == 1 and kind("axe") == "junk" and #caught == 1 and caught[1]:find("listener blew up", 1, true) ~= nil)
+press(0, 1, 2)
+local from = #out + 1; SlashCmdList.JUNKMARK("check"); local report = table.concat(out, "\n", from)
+check("/jm check names the windows followed and finds no sellers", report:find("following AnotherBagWindow, ElvUI_ContainerFrame", 1, true) and report:find("no other addon that sells junk", 1, true))
+ElvUI_ContainerFrame, BetterBagsItemButton0, BetterBagsItemButton1, BetterBagsItemButton2, BagBrotherContainerItem1 = nil
+end
+
+--------------------------------------------------------------------------------
+-- Other addons that sell junk, and Baganator's junk source
+--
+-- These fakes copy only the calls JunkMark makes, as read in each addon's code. A
+-- pass shows JunkMark's side matches that reading. It says nothing about whether the
+-- reading is right, or about how the real addons behave.
+--------------------------------------------------------------------------------
+do
+caught = {}
+local bgr = { refreshes = 0, junkActive = true }
+Baganator = { API = {
+  RegisterJunkPlugin = function(label, id, callback) assert(label == "JunkMark" and id == "junkmark"); bgr.junk = callback end,
+  RequestItemButtonsRefresh = function() bgr.refreshes = bgr.refreshes + 1 end,
+  IsJunkPluginActive = function(id) assert(id == "junkmark"); return bgr.junkActive end,
+} }
+EUI_CategoryManager = { markerOn = true }
+function EUI_CategoryManager:IsJunk(itemID, quality) assert(self == EUI_CategoryManager and itemID); return quality == 0 end
+function EUI_CategoryManager:IsJunkMarkerEnabled() return self.markerOn end
+EUI_Bags = { SellJunk = function() end }
+EllesmereUIDB = {}
+local rxp = { inventoryManager = {} }
+function rxp.inventoryManager:IsJunk(id) assert(self == rxp.inventoryManager and id); return true end
+local bbSeller = {}
+function bbSeller:StillThere(data, forSale) assert(self == bbSeller and data and forSale ~= nil); return 1 end
+aceAddons.RXPGuides = rxp
+aceAddons.BetterBags = { GetModule = function(_, name, silent) assert(name == "Seller" and silent == true); return bbSeller end }
+LibStub = setmetatable({}, { __call = function(_, name, silent)
+  assert(name == "AceAddon-3.0" and silent == true)
+  return { GetAddon = function(_, addon, quiet) assert(quiet == true); return aceAddons[addon] end }
+end })
+Scrap = {}
+function Scrap:IsJunk(id) assert(self == Scrap and id); return true end
+SellJunk = { exceptions = { ring = true } }
+function SellJunk:CheckItemIsJunk(link) assert(self == SellJunk and link); return true end
+function SellJunk:isException(item) assert(self == SellJunk); return self.exceptions[item.itemID] == true end
+-- How that version of SellJunk decides, copied from its Sell: gray and not an exception, or an exception that is not gray.
+local function sellJunkSells(item) local gray = item.quality == 0; local ex = SellJunk:isException(item); return (gray and not ex) or ((not gray) and ex) end
+DejunkApi = { junk = {} }
+function DejunkApi:IsJunk(bag, slot) assert(self == DejunkApi); return self.junk[bag * 100 + slot] == true end
+Vendor = { sell = {} }
+Vendor.EvaluateItem = function(bag, slot) if bag == 1 and slot == 8 then error("vendor blew up") end; return Vendor.sell[bag * 100 + slot] and 2 or 0 end
+LeaPlusDB = { AutoSellJunk = "Off" }
+AutoSellGreyItems = true
+C_MerchantFrame = { IsSellAllJunkEnabled = function() return true end }
+loaded.EllesmereUIQoL, loaded.Peddler = true, true
+relog()
+-- bags: (0,1) axe, (0,2) boots junk, (0,3) gray-tooth, (0,4) ring favorite
+
+local quiet = #out
+check("Baganator's junk source: marked junk and unmarked grays, never a favorite or a plain item", bgr.junk(0, 2) == true and bgr.junk(0, 3) == true and bgr.junk(0, 4) == false and bgr.junk(0, 1) == false)
+local asked = bgr.refreshes; press(0, 1)
+check("a mark change asks Baganator to look again", bgr.refreshes == asked + 1 and bgr.junk(0, 1) == true)
+press(0, 1, 2)
+
+check("EllesmereUI's junk test: an item with a favorite copy is not junk, another gray still is", EUI_CategoryManager:IsJunk("ring", 0) == false and EUI_CategoryManager:IsJunk("gray-tooth", 0) == true)
+check("RestedXP's junk test: not the favorite, by slot or by item ID; anything else as before",
+  rxp.inventoryManager:IsJunk("ring", 0, 4) == false and rxp.inventoryManager:IsJunk("ring") == false
+  and rxp.inventoryManager:IsJunk("axe", 0, 1) == true and rxp.inventoryManager:IsJunk("axe") == true)
+check("Scrap: a favorite's slot is not junk; other slots, and its own list edits by item ID, are as before", Scrap:IsJunk("ring", 0, 4) == false and Scrap:IsJunk("axe", 0, 1) == true and Scrap:IsJunk("ring") == true)
+check("BetterBags: a favorite is skipped when selling, and only then",
+  bbSeller:StillThere({ bagid = 0, slotid = 4 }, true) == nil and bbSeller:StillThere({ bag = 0, slot = 4 }, true) == nil
+  and bbSeller:StillThere({ bag = 0, slot = 4 }, false) == 1 and bbSeller:StillThere({ bag = 0, slot = 1 }, true) == 1)
+check("SellJunk, asked by slot: a favorite is not junk", SellJunk:CheckItemIsJunk("[ring]", 0, 4) == false and SellJunk:CheckItemIsJunk("[axe]", 0, 1) == true)
+
+put(0, 7, "twin-1", 20, { id = "twin" }); put(0, 8, "twin-2", 20, { id = "twin" }); fire("BAG_UPDATE_DELAYED"); ContainerFrameCombinedBags:UpdateItems()
+press(0, 7, 2)
+check("with two copies: by item ID one favorite protects both, by slot only the favorite", kind("twin-1") == "favorite"
+  and EUI_CategoryManager:IsJunk("twin", 0) == false and rxp.inventoryManager:IsJunk("twin", 0, 7) == false and rxp.inventoryManager:IsJunk("twin", 0, 8) == true)
+press(0, 7)
+check("unmarking lifts the protection", EUI_CategoryManager:IsJunk("twin", 0) == true and rxp.inventoryManager:IsJunk("twin", 0, 7) == true)
+press(0, 7, 2); local whileCarried = EUI_CategoryManager:IsJunk("twin", 0)
+bags[0][7] = nil; fire("BAG_UPDATE_DELAYED")
+check("a favorite that leaves the bags stops protecting its item ID", whileCarried == false and EUI_CategoryManager:IsJunk("twin", 0) == true)
+check("favoriting items no other addon wants printed nothing", #out == quiet)
+
+-- Sellers of every gray item, which can only be warned about
+put(0, 5, "gray-fav", 5, { quality = 0 }); put(1, 2, "gray-two", 5, { quality = 0 }); put(1, 3, "gray-three", 5, { quality = 0 })
+fire("BAG_UPDATE_DELAYED"); ContainerFrameCombinedBags:UpdateItems()
+local from = #out + 1; press(0, 5, 2); local said = table.concat(out, "\n", from)
+check("Peddler is warned about when a gray item is favorited", kind("gray-fav") == "favorite" and #out == from and said:find("Peddler sells every gray item", 1, true))
+from = #out + 1; press(1, 2, 2)
+check("the same seller is warned about once a session", kind("gray-two") == "favorite" and #out == from - 1)
+LeaPlusDB.AutoSellJunk = "On"; EUI_CategoryManager.markerOn = false
+press(1, 3, 2); said = table.concat(out, "\n", from)
+check("Leatrix Plus, and EllesmereUI selling outside its junk marker, are warned about as well", #out == from + 1
+  and said:find("Leatrix Plus sells every gray item", 1, true) and said:find("EllesmereUI's Auto Sell Junk sells every gray item", 1, true))
+check("SellJunk, asked by item: a favorite on its sell list is kept, a gray favorite is kept, other grays still sell",
+  sellJunkSells({ itemID = "ring", quality = 1 }) == false and sellJunkSells({ itemID = "gray-fav", quality = 0 }) == false
+  and sellJunkSells({ itemID = "gray-tooth", quality = 0 }) == true)
+press(0, 4)
+check("SellJunk: its own answer returns once the item is no longer a favorite", sellJunkSells({ itemID = "ring", quality = 1 }) == true)
+press(0, 4, 2)
+
+-- Addons that cannot be stopped but can be asked
+put(0, 6, "odd-gem", 300); put(1, 8, "far-gem", 300); fire("BAG_UPDATE_DELAYED"); ContainerFrameCombinedBags:UpdateItems()
+DejunkApi.junk[6], Vendor.sell[6] = true, true
+from = #out + 1; press(0, 6, 2); said = table.concat(out, "\n", from)
+check("a favorite that Dejunk or Vendor counts as junk is warned about by name", #out == from + 1
+  and said:find("Dejunk counts this item as junk", 1, true) and said:find("Vendor counts this item as junk", 1, true))
+from = #out + 1; press(1, 8, 2)
+check("an error inside the addon being asked is not JunkMark's error and warns of nothing", kind("far-gem") == "favorite" and #out == from - 1)
+
+from = #out + 1; SlashCmdList.JUNKMARK("check"); said = table.concat(out, "\n", from)
+check("/jm check names every seller found and what was done about it",
+  said:find("follow JunkMark", 1, true) and said:find("EllesmereUI's junk marker: guarded", 1, true) and said:find("RestedXP's inventory manager: guarded", 1, true)
+  and said:find("Scrap: guarded", 1, true) and said:find("BetterBags' selling: guarded", 1, true) and said:find("SellJunk: guarded", 1, true)
+  and said:find("Dejunk|r cannot be guarded, and counts 1 of your favorites", 1, true) and said:find("Vendor|r cannot be guarded, and counts 1 of your favorites", 1, true)
+  and said:find("Peddler", 1, true) and said:find("Leatrix Plus", 1, true))
+bgr.junkActive = false
+from = #out + 1; SlashCmdList.JUNKMARK("check"); said = table.concat(out, "\n", from)
+check("/jm check says when Baganator follows another junk source", said:find("follow another junk source", 1, true))
+check("the game's own Sell All Junk button is never mentioned: leaving it alone was decided", not table.concat(out, "\n"):find("Sell All Junk", 1, true))
+if #caught > 0 then io.write("listener error: ", caught[1], "\n") end
+check("no listener raised an error", #caught == 0)
+end
 
 io.write(fails == 0 and "ALL PASSED\n" or (fails .. " FAILED\n")); os.exit(fails == 0 and 0 or 1)

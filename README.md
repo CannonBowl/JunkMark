@@ -14,6 +14,7 @@ JunkMark is an addon for World of Warcraft: Forever that marks bag items the way
 - Overlay icons in your bags show what each marked item is and where it is headed
 - Refundable items are never sold, and a sale only counts once the item has left your bags
 - Marks follow items when bags are sorted, and are saved per character
+- Keeps favorites out of the junk selling of Scrap, BetterBags, SellJunk, EllesmereUI and RestedXP, and warns about sellers it cannot stop
 
 ## Getting Started
 
@@ -47,6 +48,9 @@ Hover an item in your bags and press **Space**:
 Marking also works in bag addons that draw their own bag window, such as Bagnon, Baganator and EllesmereUIBags. JunkMark has no code specific to any of them: it recognises item buttons built from the game's own bag-button template, which these addons use.
 
 - JunkMark notices such a window the first time your cursor rests on one of its items, and remembers it. That first hover is needed once per character; after that the window's marks show as soon as it opens, including after a login or `/reload`.
+- ElvUI, EllesmereUI Bags, BetterBags and Bagnon need no first hover: their bag window, or their item buttons, have fixed names that JunkMark looks for. (Added in 0.7.0 by reading their code; not yet seen in the game.)
+- A bag addon reuses its buttons for different slots when it sorts or filters. JunkMark redraws a mark in the same frame the addon gives the button its new item's icon, so a mark does not sit on the wrong item while the bags rearrange. (Also 0.7.0, and also not yet seen in the game. Before that it was checked a few times a second.)
+- While Bagnon shows another character's bags, no marks are drawn in its window.
 - Only bag slots can be marked, not bank slots.
 - Bag addons put things of their own in the corners of an item (Baganator and EllesmereUIBags write the item level top-left). The mark icon sits bottom-right by default, under the stack count; if that corner is taken in your layout, move it with `/jm corner`.
 
@@ -83,8 +87,38 @@ While a vendor window is open, a favorite cannot be right-clicked or dragged; tr
 The protection covers selling only:
 
 - A favorite can still be disenchanted by hand, deleted, or traded.
-- If the client's built-in "sell all gray items" vendor button is enabled, it could still sell a gray-quality favorite.
+- If the client's built-in "sell all gray items" vendor button is enabled, it could still sell a gray-quality favorite. JunkMark leaves that button alone.
+- Another addon that sells junk may not know about favorites. See below.
 - `/jm clear` removes favorites along with junk marks.
+
+### Other addons that sell junk
+
+Other junk addons decide what is junk by item type, so they cannot tell a favorite from another copy of the same item. Run `/jm check` to see which of them JunkMark found on your character and what it did about each.
+
+> Added in 0.7.0 by reading each addon's code at the version named. None of it has been run in the game.
+
+| Addon | Version read | What JunkMark does |
+| --- | --- | --- |
+| Scrap | 12.1.10 | Guarded: it never sells or destroys a favorite |
+| BetterBags (its own selling) | development, 2026-11-18 | Guarded: it never sells a favorite |
+| SellJunk | Beast-Masters copy, 2026-11-08 | Guarded: by slot where that version allows, otherwise for every copy of a favorited item |
+| RestedXP inventory manager (auto-sell, delete when bags are full) | 4.11.36 | Guarded: it never treats a favorite as junk |
+| EllesmereUI junk marker (Sell Junk, and Auto Sell Junk while the Junk Icon is on) | 9.8.9 | Guarded: no copy of an item is junk to it while one copy in your bags is a favorite |
+| Dejunk | 3.5.1 | Cannot be stopped; asked about each new favorite, and warns if it counts it as junk |
+| Vendor | 6.14.0 | Cannot be stopped; asked about each new favorite, and warns if it would sell it |
+| Peddler | Cartas's copy, 2026-11-09 | Cannot be stopped; warns about gray favorites |
+| EllesmereUI Auto Sell Junk with the Bags Junk Icon off | 9.8.9 | Cannot be stopped; warns about gray favorites |
+| Leatrix Plus "Sell junk automatically" | 1.60.32 | Cannot be stopped; warns about gray favorites |
+
+- A guard changes only what the other addon is told about favorites. Nothing is written to its settings, and JunkMark's junk marks are not passed to it.
+- Dejunk and Vendor keep their selling private, so JunkMark cannot stop them. It can ask them, so it tells you when a favorite needs adding to their own keep lists, and `/jm check` counts such favorites.
+- The gray sellers only take gray items, so only a gray favorite is at risk. JunkMark warns once per session, per seller, when you make a gray item a favorite while one is active.
+- EllesmereUI's Junk Items window can still list a gray favorite. It deletes only on your Ctrl-click.
+- A junk seller not in this table is not known to JunkMark at all.
+
+### Baganator's junk source
+
+JunkMark offers itself to Baganator as its source of what is junk: marked junk, plus unmarked gray items with a vendor price, and never a favorite. Baganator's junk coin, its `junk` search word and its junk category then follow JunkMark. You can pick another source under Baganator's Plugins settings.
 
 ## Keybindings
 
@@ -124,6 +158,10 @@ Two bindings are listed under Options > Keybindings > AddOns:
 # Forget which items the game refused to disenchant, so they can be queued again.
 /jm forget
 
+# Show which bag windows JunkMark is following, which other junk sellers it found,
+# and what it did about each.
+/jm check
+
 # Write what the game reports about each junk-marked item into the saved data,
 # to attach to a bug report. It is on disk after a /reload.
 /jm debug
@@ -141,15 +179,29 @@ Two bindings are listed under Options > Keybindings > AddOns:
 
 ## Development
 
-Everything is in `JunkMark.lua`. `Bindings.xml` declares the two key bindings, and `JunkMark.toc` is the manifest.
+`JunkMark.lua` holds the addon itself. `OtherAddons.lua` holds the guards and warnings for other junk sellers and the Baganator junk source. `Bindings.xml` declares the two key bindings, and `JunkMark.toc` is the manifest.
 
 Run the logic tests from the addon folder:
 
 ```bash
-lua tests/mock_test.lua JunkMark.lua
+lua tests/mock_test.lua
 ```
 
-These run outside the game against a fake of the WoW API. A pass shows the addon's logic is self-consistent, not that it works in the client: the fake accepts any method name, and it encodes assumptions about how the real API behaves. The game runs Lua 5.1.
+The tests load the files `JunkMark.toc` lists. They run outside the game against a fake of the WoW API, and of the few calls JunkMark makes into other addons. A pass shows the addon's logic is self-consistent, not that it works in the client: the fake accepts any method name, and it encodes assumptions about how the real API and the other addons behave. The game runs Lua 5.1.
+
+To guard another junk seller, add a function to `OtherAddons.lua` that wraps the one function that addon asks before selling an item.
+
+### For other addons
+
+JunkMark exposes a small global table, `JunkMarkAPI` (`version = 1`). Bags and slots are the game's own numbers.
+
+| Call | Returns |
+| --- | --- |
+| `JunkMarkAPI.GetMark(bag, slot)` | `"junk"`, `"favorite"`, or `nil` |
+| `JunkMarkAPI.IsJunk(bag, slot)` | boolean |
+| `JunkMarkAPI.IsFavorite(bag, slot)` | boolean |
+| `JunkMarkAPI.IsItemFavorite(itemID)` | whether any copy in the bags is a favorite |
+| `JunkMarkAPI.OnChanged(func)` | nothing; `func` is called whenever a mark changes |
 
 To add another ability that is cast on a bag item and uses it up, add an entry to the `ACTIONS` table near the top of `JunkMark.lua`: a spell ID and a rule for which items qualify.
 
