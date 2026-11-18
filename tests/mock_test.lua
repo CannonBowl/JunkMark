@@ -339,6 +339,8 @@ check("only the item that left the bags is counted and unmarked", money - before
 check("refused item is reported and keeps its junk mark", kind("stubborn") == "junk" and bags[0][1] ~= nil and text:find("1 item didn't sell and is still marked as junk.", 1, true) ~= nil)
 check("refundable item is left alone and the player is told", kind("receipt") == "junk" and bags[0][3] ~= nil and text:find("Left 1 junk item alone because you can still return it for a refund.", 1, true) ~= nil)
 check("button usable again after the run", JunkMarkSellButton.enabled)
+local saleTrace = table.concat(JunkMarkDB.trace, "\n")
+check("the trace records what the sale set out to do and how it ended", saleTrace:find("sale: 2 to send worth 100 copper, 0 kept for a profession, 1 refundable left alone", 1, true) ~= nil and saleTrace:find("sale: 2 sent, 1 sold for 60 copper, 1 still in the bags", 1, true) ~= nil)
 refused.stubborn = nil; SlashCmdList.JUNKMARK("sell"); pumpRaw(1); merchantOpen = false; fire("MERCHANT_CLOSED")
 check("closing the vendor mid-run still settles what sold", kind("stubborn") == nil and money - before == 100)
 
@@ -450,11 +452,21 @@ merchantOpen = true; fire("MERCHANT_SHOW"); merchantOpen = false; fire("MERCHANT
 check("a vendor visit never drops a favorite", kind("lost") == "favorite" and kind("banked") == "favorite")
 fire("BANKFRAME_OPENED"); fire("BANKFRAME_CLOSED"); nextFrame()
 check("opening and shutting the bank before its contents arrive drops nothing", kind("lost") == "favorite")
+local function lastTrace() return JunkMarkDB.trace[#JunkMarkDB.trace] end
+check("...and the trace says the prune was skipped, and why", lastTrace():find("prune: skipped, the bank closed before it could be read", 1, true) ~= nil)
+local realSlots = C_Container.GetContainerNumSlots; C_Container.GetContainerNumSlots = function() return 0 end
+fire("BANKFRAME_OPENED"); nextFrame(); fire("BANKFRAME_CLOSED"); C_Container.GetContainerNumSlots = realSlots
+check("a bank that reads as empty of slots drops nothing, and the trace says so", kind("lost") == "favorite" and lastTrace():find("prune: skipped, the bank read as 0 slots", 1, true) ~= nil)
 local toldAt = #out + 1; fire("BANKFRAME_OPENED")
 check("nothing is dropped the instant the bank opens", kind("lost") == "favorite"); nextFrame()
 check("with the bank open, a favorite that is nowhere is dropped, and said so", kind("lost") == nil and table.concat(out, "\n", toldAt):find("Removed 1 favorite mark for item you no longer have.", 1, true) ~= nil)
 check("...one in the bank, one being worn and one in the bags are kept", kind("banked") == "favorite" and kind("worn") == "favorite" and kind("cloth-B") == "favorite")
 check("...and so is one the game still reports holding", kind("odd") == "favorite")
+check("...and the trace accounts for every favorite", lastTrace():find("prune: 16 bank slots read, 5 favorites: 1 in bags, 2 in bank or worn, 1 held elsewhere per the game, 0 unsure, 1 dropped", 1, true) ~= nil)
+local realHeld = C_Item.IsItemGUIDInInventory; C_Item.IsItemGUIDInInventory = function() error("no such item") end
+fire("BANKFRAME_CLOSED"); fav("lost", 206); fire("BANKFRAME_OPENED"); nextFrame(); C_Item.IsItemGUIDInInventory = realHeld
+check("a favorite the game cannot answer for is kept and counted as unsure", kind("lost") == "favorite" and lastTrace():find("2 unsure, 0 dropped", 1, true) ~= nil)
+JunkMarkDB.marked.lost = nil
 fire("BANKFRAME_CLOSED"); fav("lost", 205); bags[6] = {}; fire("BANKFRAME_OPENED"); nextFrame()
 check("an item taken out of the bank and destroyed is dropped at the next bank visit", kind("lost") == nil and kind("banked") == nil and kind("worn") == "favorite")
 fire("BANKFRAME_CLOSED"); JunkMarkDB.marked.worn, JunkMarkDB.marked.odd, elsewhere.odd = nil, nil, nil; bags[6], bags.equipped = nil, nil
