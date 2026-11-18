@@ -255,7 +255,8 @@ end
 -- search word and its junk category then follow that addon. JunkMark's answer is what
 -- is marked junk, plus unmarked gray items with a vendor price (Baganator's own
 -- default rule), and never a favorite. Registering makes JunkMark Baganator's junk
--- source unless the player has picked another under its Plugins settings.
+-- source unless the player has picked another: the "Junk detection" setting on the
+-- General tab of Baganator's settings (CustomiseDialog/Main.lua, SetupGeneral).
 --
 -- This has nothing to do with drawing JunkMark's own marks in Baganator's window,
 -- which JunkMark.lua does the same way as for any other bag addon.
@@ -299,7 +300,7 @@ ns.On("favorited", OnFavorited);
 ns.checks[#ns.checks + 1] = function(lines)
 	if baganator then
 		if baganator.IsJunkPluginActive and not baganator.IsJunkPluginActive(BAGANATOR_ID) then
-			lines[#lines + 1] = "Baganator: its junk coin, search and junk category follow another junk source, not JunkMark. That is chosen under Baganator's Plugins settings.";
+			lines[#lines + 1] = "Baganator: its junk coin, search and junk category follow another junk source, not JunkMark. That is the Junk detection setting on the General tab of Baganator's settings.";
 		else
 			lines[#lines + 1] = "Baganator: its junk coin, search and junk category follow JunkMark (marked junk and gray items, never a favorite).";
 		end

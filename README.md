@@ -118,7 +118,7 @@ Other junk addons decide what is junk by item type, so they cannot tell a favori
 
 ### Baganator's junk source
 
-JunkMark offers itself to Baganator as its source of what is junk: marked junk, plus unmarked gray items with a vendor price, and never a favorite. Baganator's junk coin, its `junk` search word and its junk category then follow JunkMark. You can pick another source under Baganator's Plugins settings.
+JunkMark offers itself to Baganator as its source of what is junk: marked junk, plus unmarked gray items with a vendor price, and never a favorite. Baganator's junk coin, its `junk` search word and its junk category then follow JunkMark. You can pick another source with the Junk detection setting on the General tab of Baganator's settings.
 
 ## Keybindings
 
