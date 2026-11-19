@@ -58,6 +58,19 @@ Marking also works in bag addons that draw their own bag window, such as Bagnon,
 
 Junk goes to a vendor unless you send it to a profession. Which of the two an item can go to depends on your character and the item.
 
+### Manual or automatic
+
+`/jm mode` sets what counts as junk. It is saved per character.
+
+- **Manual**, the default: nothing is junk until you mark it.
+- **Automatic** (`/jm mode auto`): gray items a vendor will buy are junk without being marked, and show the coin. Everything else still has to be marked.
+
+In automatic mode Space on a gray item steps through favorite, then **not junk**, then junk again. Not junk is remembered for that one item, so it is never sold; another copy you loot later is junk like any other gray. Sell Junk, `/jm sell` and auto-sell take automatic junk along with what you marked.
+
+- A gray item bought back from a vendor is junk again. Set it to not junk if you want to keep it.
+- Not-junk marks are only cleaned up at the bank, like favorites, and only for items you no longer have.
+- `/jm mode manual` switches back. Your not-junk marks are kept in case you return, but mean nothing while junk is manual.
+
 ### Selling
 
 A **Sell Junk (N)** button hangs under the bottom-right corner of the vendor window, in the same row as its tabs. It narrows to fit beside a tab another addon adds, and only drops to a row of its own when there is no room at all. It sells every junk item bound for the vendor and reports the total.
@@ -118,7 +131,10 @@ Other junk addons decide what is junk by item type, so they cannot tell a favori
 
 ### Baganator's junk source
 
-JunkMark offers itself to Baganator as its source of what is junk: marked junk, plus unmarked gray items with a vendor price, and never a favorite. Baganator's junk coin, its `junk` search word and its junk category then follow JunkMark. You can pick another source with the Junk detection setting on the General tab of Baganator's settings.
+JunkMark offers itself to Baganator as its source of what is junk, and Baganator selects it unless you have picked a source there yourself. JunkMark's answer is exactly what JunkMark counts as junk: what you marked, plus gray items when junk is automatic, and never a favorite or an item set to not junk. Baganator's junk category, its `junk` search word, its sort order and its own junk coin then follow JunkMark, so there is one idea of junk in your bags.
+
+- **Two coins.** JunkMark draws its own mark in Baganator's window as it does everywhere, so a junk item there also carries Baganator's coin. For one coin, take the junk coin out of Icon Corners in Baganator's settings.
+- You can pick another source with the Junk detection setting on the General tab of Baganator's settings. Baganator then leaves that choice alone.
 
 ## Keybindings
 
@@ -146,6 +162,12 @@ Two bindings are listed under Options > Keybindings > AddOns:
 
 # Toggle selling automatically when a vendor opens. Off by default.
 /jm auto
+
+# Show or set what counts as junk: only what you mark (manual, the default),
+# or gray items a vendor buys as well (auto).
+/jm mode
+/jm mode auto
+/jm mode manual
 
 # Show your professions, their abilities, and how junk is routed.
 /jm professions
@@ -197,7 +219,7 @@ JunkMark exposes a small global table, `JunkMarkAPI` (`version = 1`). Bags and s
 
 | Call | Returns |
 | --- | --- |
-| `JunkMarkAPI.GetMark(bag, slot)` | `"junk"`, `"favorite"`, or `nil` |
+| `JunkMarkAPI.GetMark(bag, slot)` | `"junk"`, `"favorite"`, or `nil`. Junk includes automatic junk |
 | `JunkMarkAPI.IsJunk(bag, slot)` | boolean |
 | `JunkMarkAPI.IsFavorite(bag, slot)` | boolean |
 | `JunkMarkAPI.IsItemFavorite(itemID)` | whether any copy in the bags is a favorite |

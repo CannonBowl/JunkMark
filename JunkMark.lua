@@ -45,6 +45,15 @@ local SCHEMA_VERSION = 3;
 
 local KIND_JUNK = "junk";
 local KIND_FAVORITE = "favorite";
+-- "Not junk": holds one item out of automatic junk (see GetMark). It means nothing in
+-- manual mode, and a version that does not know it treats the item as unmarked.
+local KIND_KEEP = "keep";
+
+-- db.mode. Manual: nothing is junk until it is marked. Automatic: gray items a vendor
+-- will buy are junk without being marked, unless the player has said otherwise for
+-- that one item. A save with no mode is manual.
+local MODE_MANUAL = "manual";
+local MODE_AUTO = "auto";
 
 -- Item links whose tooltip says the item cannot be disenchanted. Only a "yes" is
 -- remembered: it never changes, while a "no" read before the client has the item's
@@ -211,6 +220,39 @@ local function GetBagGUIDs()
 		present[guid] = true;
 	end);
 	return present;
+end
+
+-- Whether the item in a slot is junk by the automatic rule alone: the mode is on, and
+-- it is a gray item a vendor will buy. This is the rule the game's own Sell All Junk
+-- button and most bag addons use.
+local function IsAutoJunk(bag, slot)
+	if not db or db.mode ~= MODE_AUTO then
+		return false;
+	end
+	local info = C_Container.GetContainerItemInfo(bag, slot);
+	return info ~= nil and info.quality == Enum.ItemQuality.Poor and not info.hasNoValue;
+end
+
+-- Stands in for the mark of an item that is junk by the automatic rule. It is never
+-- stored. Always vendor junk: a gray item has no profession use.
+local AUTO_MARK = { kind = KIND_JUNK, sellOnly = true, auto = true };
+
+-- The mark that applies to the item in a bag slot: the one the player set, or
+-- AUTO_MARK for automatic junk, or nil. A "not junk" mark answers nil here, which is
+-- what keeps its item out of automatic junk. Everything that draws, sells or reports
+-- junk asks this; db.marked alone says only what the player set by hand.
+local function GetMark(guid, bag, slot)
+	local mark = guid and db.marked[guid];
+	if mark then
+		if mark.kind == KIND_KEEP then
+			return nil;
+		end
+		return mark;
+	end
+	if guid and IsAutoJunk(bag, slot) then
+		return AUTO_MARK;
+	end
+	return nil;
 end
 
 local function FormatMoney(copper)
@@ -414,7 +456,7 @@ end
 local function UpdateButtonOverlay(button)
 	local bag, slot = button:GetBagID(), button:GetID();
 	local guid = GetSlotGUID(bag, slot);
-	local mark = guid and db.marked[guid];
+	local mark = guid and GetMark(guid, bag, slot);
 	local isJunk = mark ~= nil and mark.kind == KIND_JUNK;
 	local isFavorite = mark ~= nil and mark.kind == KIND_FAVORITE;
 
@@ -903,6 +945,9 @@ function CycleSlot(bag, slot)
 	local current = mark and mark.kind;
 	local canSell = not info.hasNoValue;
 	local hasAction = FindAction(info, bag, slot) ~= nil;
+	-- In automatic mode a gray item is junk while it carries no mark, so its cycle is
+	-- junk (no mark) -> favorite -> not junk (a mark of its own) -> junk again.
+	local autoJunk = IsAutoJunk(bag, slot);
 
 	local nextKind, sellOnly;
 	if current == KIND_JUNK then
@@ -912,7 +957,11 @@ function CycleSlot(bag, slot)
 			nextKind = KIND_FAVORITE;
 		end
 	elseif current == KIND_FAVORITE then
-		nextKind = nil;
+		nextKind = autoJunk and KIND_KEEP or nil;
+	elseif autoJunk then
+		-- Either it is junk by the rule, and the next step is favorite, or it was
+		-- held out of the rule, and removing that mark makes it junk again.
+		nextKind = current ~= KIND_KEEP and KIND_FAVORITE or nil;
 	elseif canSell then
 		-- Always sellOnly, even with no profession to hold the item back from: junk the
 		-- player marked for the vendor stays vendor junk if a profession is learned later.
@@ -921,10 +970,18 @@ function CycleSlot(bag, slot)
 		nextKind = hasAction and KIND_JUNK or KIND_FAVORITE;
 	end
 
-	Trace("mark key: item", info.itemID, "->", nextKind or "none", sellOnly and "(vendor)" or "",
+	-- What the item shows afterwards. With no mark left, a gray item in automatic mode
+	-- is junk again; with a "not junk" mark it shows nothing.
+	local shown = nextKind;
+	if nextKind == KIND_KEEP then
+		shown = nil;
+	elseif nextKind == nil and autoJunk then
+		shown = KIND_JUNK;
+	end
+	Trace("mark key: item", info.itemID, "->", nextKind == KIND_KEEP and "not junk" or nextKind or (autoJunk and "automatic junk" or "none"), sellOnly and "(vendor)" or "",
 		hasAction and "[can be queued]" or "[no profession use]", canSell and "" or "[no sell value]");
 	SetMark(guid, nextKind, sellOnly);
-	PlaySound(nextKind and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF);
+	PlaySound(shown and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF);
 	OnMarksChanged();
 	if nextKind == KIND_FAVORITE then
 		Fire("favorited", bag, slot, info);
@@ -1027,8 +1084,20 @@ local function PruneFavorites()
 	end
 	local present = GetBagGUIDs();
 	local favorites, inBags, inBankOrWorn, heldElsewhere, unsure, dropped = 0, 0, 0, 0, 0, 0;
+	-- "Not junk" marks go the same way, under the same test, without a chat line:
+	-- one dropped too early would let its item be sold as automatic junk.
+	local keeps, keepsDropped = 0, 0;
 	for guid, mark in pairs(db.marked) do
-		if mark.kind == KIND_FAVORITE then
+		if mark.kind == KIND_KEEP then
+			keeps = keeps + 1;
+			if not present[guid] and not stored[guid] then
+				local ok, held = pcall(C_Item.IsItemGUIDInInventory, guid);
+				if ok and held == false then
+					db.marked[guid] = nil;
+					keepsDropped = keepsDropped + 1;
+				end
+			end
+		elseif mark.kind == KIND_FAVORITE then
 			favorites = favorites + 1;
 			if present[guid] then
 				inBags = inBags + 1;
@@ -1049,6 +1118,9 @@ local function PruneFavorites()
 	end
 	Trace(string.format("prune: %d bank slots read, %d favorites: %d in bags, %d in bank or worn, %d held elsewhere per the game, %d unsure, %d dropped",
 		bankSlots, favorites, inBags, inBankOrWorn, heldElsewhere, unsure, dropped));
+	if keeps > 0 then
+		Trace(string.format("prune: %d not-junk marks, %d dropped", keeps, keepsDropped));
+	end
 	if dropped > 0 then
 		Print(string.format("Removed %d favorite mark%s for item%s you no longer have.", dropped, Plural(dropped), Plural(dropped)));
 	end
@@ -1075,7 +1147,7 @@ end
 local function CollectJunk(includeHeld)
 	local queue, totalValue, heldCount, refundableCount = {}, 0, 0, 0;
 	ForEachBagItem(function(bag, slot, guid)
-		local mark = db.marked[guid];
+		local mark = GetMark(guid, bag, slot);
 		local info = mark and C_Container.GetContainerItemInfo(bag, slot);
 		local disposal = GetDisposal(mark, info, bag, slot);
 		if disposal and not info.hasNoValue then
@@ -1150,9 +1222,10 @@ local function SellTick()
 
 	local entry = table.remove(run.queue);
 	if entry then
-		-- Bags can change mid-run, so confirm the slot still holds a junk-marked item.
-		local mark = db.marked[entry.guid];
-		if mark and mark.kind == KIND_JUNK and GetSlotGUID(entry.bag, entry.slot) == entry.guid then
+		-- Bags can change mid-run, so confirm the slot still holds that item and that
+		-- it is still junk (marked, or junk by the automatic rule).
+		local mark = GetSlotGUID(entry.bag, entry.slot) == entry.guid and GetMark(entry.guid, entry.bag, entry.slot);
+		if mark and mark.kind == KIND_JUNK then
 			local info = C_Container.GetContainerItemInfo(entry.bag, entry.slot);
 			if info and not info.isLocked then
 				C_Container.UseContainerItem(entry.bag, entry.slot);
@@ -1561,10 +1634,11 @@ end
 -- copy in the bags is a favorite, every copy counts as protected.
 --------------------------------------------------------------------------------
 
--- The mark on the item in a bag slot: "junk", "favorite", or nil.
+-- What the item in a bag slot counts as: "junk", "favorite", or nil. Junk includes
+-- automatic junk; an item held out of it answers nil.
 local function GetSlotMarkKind(bag, slot)
 	local guid = db and GetSlotGUID(bag, slot);
-	local mark = guid and db.marked[guid];
+	local mark = guid and GetMark(guid, bag, slot);
 	local kind = mark and mark.kind;
 	if kind == KIND_JUNK or kind == KIND_FAVORITE then
 		return kind;
@@ -1684,7 +1758,7 @@ end
 local function WriteDebugDump()
 	local items = {};
 	ForEachBagItem(function(bag, slot, guid)
-		local mark = db.marked[guid];
+		local mark = GetMark(guid, bag, slot);
 		if not mark or mark.kind ~= KIND_JUNK then
 			return;
 		end
@@ -1709,6 +1783,7 @@ local function WriteDebugDump()
 			isQuestItem = quest and quest.isQuestItem,
 			questID = quest and quest.questID,
 			sellOnly = mark.sellOnly,
+			automatic = mark.auto,
 			routedTo = disposal == DISPOSAL_SELL and "sell" or disposal and disposal.label or "nothing",
 			tooltip = lines,
 		};
@@ -1813,7 +1888,31 @@ SlashCmdList["JUNKMARK"] = function(message)
 	elseif command == "clear" then
 		wipe(db.marked);
 		OnMarksChanged();
-		Print("All marks cleared, favorites included.");
+		if db.mode == MODE_AUTO then
+			Print("All marks cleared, favorites included. Gray items you had set to not junk are junk again.");
+		else
+			Print("All marks cleared, favorites included.");
+		end
+	elseif command:match("^mode") then
+		local mode = command:match("^mode%s+(%a+)$");
+		if mode == MODE_AUTO or mode == MODE_MANUAL then
+			db.mode = mode;
+			OnMarksChanged();
+			if mode == MODE_AUTO then
+				local automatic = 0;
+				ForEachBagItem(function(bag, slot, guid)
+					if GetMark(guid, bag, slot) == AUTO_MARK then
+						automatic = automatic + 1;
+					end
+				end);
+				Print(string.format("Junk is now |cff40ff40automatic|r: gray items a vendor will buy are junk without being marked (%d in your bags now). Press %s on one to make it a favorite, again for not junk.", automatic, HOVER_KEY_NAME));
+			else
+				Print("Junk is now |cff40ff40manual|r: only items you mark are junk.");
+			end
+		else
+			Print(string.format("Junk is %s. Change it with /jm mode <manual, auto>. Manual: only items you mark are junk. Auto: gray items a vendor will buy are junk unless you set one to favorite or not junk.",
+				db.mode == MODE_AUTO and "automatic" or "manual"));
+		end
 	elseif command == "sell" then
 		SellJunk(false);
 	elseif command == "sell all" then
@@ -1849,6 +1948,7 @@ SlashCmdList["JUNKMARK"] = function(message)
 		print("  /jm list        - show marked items");
 		print("  /jm sell        - sell junk (at a vendor); '/jm sell all' includes queued items");
 		print("  /jm auto        - toggle selling automatically when a vendor opens");
+		print("  /jm mode        - show or set what counts as junk: only what you mark, or gray items too");
 		print("  /jm professions - show your professions and how junk is routed");
 		print("  /jm corner      - show or set which corner of an item the mark icon sits in");
 		print("  /jm forget      - forget which items the game refused to disenchant");

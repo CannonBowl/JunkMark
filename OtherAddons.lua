@@ -249,17 +249,26 @@ local function OnFavorited(bag, slot, info)
 end
 
 --------------------------------------------------------------------------------
--- Baganator's junk source (read at version 864)
+-- Baganator's junk source (read at version 864, checked against 865)
 --
--- Baganator lets another addon say which items are junk. Its junk coin, its "junk"
--- search word and its junk category then follow that addon. JunkMark's answer is what
--- is marked junk, plus unmarked gray items with a vendor price (Baganator's own
--- default rule), and never a favorite. Registering makes JunkMark Baganator's junk
--- source unless the player has picked another: the "Junk detection" setting on the
--- General tab of Baganator's settings (CustomiseDialog/Main.lua, SetupGeneral).
+-- Baganator lets another addon say which items are junk. Its junk category, its
+-- "junk" search word, its sort order and its own junk coin then follow that addon.
+-- JunkMark's answer is exactly what JunkMark itself counts as junk: what the player
+-- marked, plus gray items when junk is automatic (/jm mode), and never a favorite or
+-- an item set to not junk. So there is one idea of junk, JunkMark's, and Baganator's
+-- own gray-item rule no longer runs beside it. (0.7.0 answered "junk" for every
+-- unmarked gray whatever the mode, which the player could not clear.)
 --
--- This has nothing to do with drawing JunkMark's own marks in Baganator's window,
--- which JunkMark.lua does the same way as for any other bag addon.
+-- Registering makes JunkMark Baganator's junk source unless the player has picked
+-- another: Baganator itself switches its "Junk detection" setting (General tab of its
+-- settings; API/Main.lua, AutoSet) to a newly registered source when the current
+-- choice is not a registered one, and its default is not.
+--
+-- JunkMark still draws its own marks in Baganator's window, the same way as in any
+-- other bag addon, so a junk item there carries Baganator's coin as well. Which
+-- corner icons Baganator draws is the player's setting in Baganator ("Icon Corners"),
+-- not something a junk source can change; /jm check and the README say how to end up
+-- with one coin.
 --------------------------------------------------------------------------------
 
 local BAGANATOR_ID = "junkmark";
@@ -272,12 +281,7 @@ local function OfferJunkToBaganator()
 	end
 	baganator = api;
 	api.RegisterJunkPlugin("JunkMark", BAGANATOR_ID, function(bag, slot)
-		local kind = ns.GetSlotMarkKind(bag, slot);
-		if kind then
-			return kind == ns.KIND_JUNK;
-		end
-		local info = C_Container.GetContainerItemInfo(bag, slot);
-		return info ~= nil and info.quality == Enum.ItemQuality.Poor and not info.hasNoValue;
+		return ns.GetSlotMarkKind(bag, slot) == ns.KIND_JUNK;
 	end);
 	ns.On("changed", function()
 		api.RequestItemButtonsRefresh();
@@ -302,7 +306,7 @@ ns.checks[#ns.checks + 1] = function(lines)
 		if baganator.IsJunkPluginActive and not baganator.IsJunkPluginActive(BAGANATOR_ID) then
 			lines[#lines + 1] = "Baganator: its junk coin, search and junk category follow another junk source, not JunkMark. That is the Junk detection setting on the General tab of Baganator's settings.";
 		else
-			lines[#lines + 1] = "Baganator: its junk coin, search and junk category follow JunkMark (marked junk and gray items, never a favorite).";
+			lines[#lines + 1] = "Baganator: its junk category, search, sort and junk coin follow JunkMark, whichever way /jm mode is set. JunkMark draws its own mark too, so junk shows two coins there. For one coin, take the junk coin out of Icon Corners in Baganator's settings.";
 		end
 	end
 

@@ -798,7 +798,7 @@ relog()
 -- bags: (0,1) axe, (0,2) boots junk, (0,3) gray-tooth, (0,4) ring favorite
 
 local quiet = #out
-check("Baganator's junk source: marked junk and unmarked grays, never a favorite or a plain item", bgr.junk(0, 2) == true and bgr.junk(0, 3) == true and bgr.junk(0, 4) == false and bgr.junk(0, 1) == false)
+check("Baganator's junk source, junk being manual: marked junk only, not an unmarked gray, a favorite or a plain item", bgr.junk(0, 2) == true and bgr.junk(0, 3) == false and bgr.junk(0, 4) == false and bgr.junk(0, 1) == false)
 local asked = bgr.refreshes; press(0, 1)
 check("a mark change asks Baganator to look again", bgr.refreshes == asked + 1 and bgr.junk(0, 1) == true)
 press(0, 1, 2)
@@ -861,6 +861,100 @@ bgr.junkActive = false
 from = #out + 1; SlashCmdList.JUNKMARK("check"); said = table.concat(out, "\n", from)
 check("/jm check says when Baganator follows another junk source", said:find("follow another junk source", 1, true))
 check("the game's own Sell All Junk button is never mentioned: leaving it alone was decided", not table.concat(out, "\n"):find("Sell All Junk", 1, true))
+if #caught > 0 then io.write("listener error: ", caught[1], "\n") end
+check("no listener raised an error", #caught == 0)
+end
+
+--------------------------------------------------------------------------------
+-- What counts as junk: manual (only what is marked) or automatic (gray items too)
+--------------------------------------------------------------------------------
+do
+caught = {}
+Scrap, SellJunk, DejunkApi, Vendor, LeaPlusDB, EUI_CategoryManager, EUI_Bags, EllesmereUIDB, AutoSellGreyItems = nil
+loaded.EllesmereUIQoL, loaded.Peddler, aceAddons.RXPGuides, aceAddons.BetterBags = nil, nil, nil, nil
+local bgr = { refreshes = 0 }
+Baganator = { API = {
+  RegisterJunkPlugin = function(_, _, callback) bgr.junk = callback end,
+  RequestItemButtonsRefresh = function() bgr.refreshes = bgr.refreshes + 1 end,
+  IsJunkPluginActive = function() return true end,
+} }
+bags[0], bags[1] = {}, {}; JunkMarkDB = nil; knowsDE = false; money = 0
+relog()
+-- bags: (0,1) tooth, (0,2) fang, (0,5) hide are gray and sell; (0,3) dust is gray with no price; (0,4) sword is not gray
+put(0, 1, "tooth", 7, { quality = 0 }); put(0, 2, "fang", 9, { quality = 0 }); put(0, 3, "dust", 0, { quality = 0, noValue = true })
+put(0, 4, "sword", 100); put(0, 5, "hide", 3, { quality = 0 })
+fire("BAG_UPDATE_DELAYED"); ContainerFrameCombinedBags:UpdateItems()
+local function marks() local n = 0; for _ in pairs(JunkMarkDB.marked) do n = n + 1 end; return n end
+local function states(...) local t = {}; for _, s in ipairs({ ... }) do t[#t + 1] = btn(0, s):state() end; return table.concat(t, " ") end
+
+check("a new save is manual: a gray item is not junk until it is marked", JunkMarkDB.mode == nil and states(1, 2, 3, 4, 5) == "none none none none none"
+  and bgr.junk(0, 1) == false and JunkMarkAPI.IsJunk(0, 1) == false)
+local from = #out + 1; SlashCmdList.JUNKMARK("mode"); SlashCmdList.JUNKMARK("mode sideways")
+check("/jm mode says which it is, and an unknown mode changes nothing", JunkMarkDB.mode == nil and #out == from + 1
+  and out[from]:find("Junk is manual", 1, true) and out[from + 1]:find("Junk is manual", 1, true))
+
+local asked = bgr.refreshes; from = #out + 1; SlashCmdList.JUNKMARK("mode auto"); nextFrame()
+check("/jm mode auto: gray items a vendor buys are junk at once, with no mark stored", JunkMarkDB.mode == "auto" and marks() == 0 and states(1, 2, 3, 4, 5) == "sell sell none none sell")
+check("...the player is told how many, and Baganator is asked to look again", out[from]:find("3 in your bags now", 1, true) and bgr.refreshes == asked + 1)
+check("...and Baganator and the API get the same answer the bags show", bgr.junk(0, 1) == true and bgr.junk(0, 3) == false and bgr.junk(0, 4) == false
+  and JunkMarkAPI.GetMark(0, 2) == "junk" and JunkMarkAPI.GetMark(0, 4) == nil)
+
+press(0, 1); local s1, k1, j1 = btn(0, 1):state(), kind("tooth"), bgr.junk(0, 1)
+press(0, 1); local s2, k2, j2 = btn(0, 1):state(), kind("tooth"), bgr.junk(0, 1)
+check("Space on automatic junk: favorite, then not junk, which is a mark of its own", s1 == "favorite" and k1 == "favorite" and j1 == false
+  and s2 == "none" and k2 == "keep" and j2 == false and JunkMarkAPI.GetMark(0, 1) == nil)
+press(0, 1)
+check("...and once more makes it junk again by removing that mark", kind("tooth") == nil and btn(0, 1):state() == "sell" and bgr.junk(0, 1) == true)
+press(0, 4); local w1 = kind("sword"); press(0, 4); local w2 = kind("sword"); press(0, 4)
+check("an item that is not gray cycles as it always did", w1 == "junk" and w2 == "favorite" and kind("sword") == nil and btn(0, 4):state() == "none")
+press(0, 3); local d1 = kind("dust"); press(0, 3)
+check("a gray item no vendor buys is not automatic junk, and cycles as it always did", d1 == "favorite" and kind("dust") == nil and btn(0, 3):state() == "none")
+local trace = table.concat(JunkMarkDB.trace, "\n")
+check("the trace names the two new steps", trace:find("mark key: item tooth -> not junk", 1, true) and trace:find("mark key: item tooth -> automatic junk", 1, true))
+
+press(0, 1, 2) -- tooth: not junk
+merchantOpen = true; fire("MERCHANT_SHOW")
+from = #out + 1; SlashCmdList.JUNKMARK("list")
+check("the vendor button and /jm list count automatic junk, and not the item held out of it", JunkMarkSellButton.text == "Sell Junk (2)" and out[from]:find("2 junk items to sell, worth 12c", 1, true))
+from = #out + 1; local before = money; SlashCmdList.JUNKMARK("sell"); pump(8)
+check("Sell Junk sells automatic junk and leaves the item set to not junk", money - before == 12 and bags[0][2] == nil and bags[0][5] == nil
+  and bags[0][1] ~= nil and bags[0][4] ~= nil and table.concat(out, "\n", from):find("Sold 2 items for 12c.", 1, true))
+put(0, 2, "fang-2", 9, { quality = 0 }); put(0, 5, "hide-2", 3, { quality = 0 }); fire("BAG_UPDATE_DELAYED"); ContainerFrameCombinedBags:UpdateItems()
+before = money; SlashCmdList.JUNKMARK("sell") -- sends the last item in the queue at once
+JunkMarkDB.marked["fang-2"] = { kind = "keep" }; pump(8)
+check("an item set to not junk while a sale is running is not sold", money - before == 3 and bags[0][2] ~= nil and bags[0][5] == nil)
+merchantOpen = false; fire("MERCHANT_CLOSED")
+
+relog()
+check("the mode and the not-junk marks survive a login", JunkMarkDB.mode == "auto" and kind("tooth") == "keep" and kind("fang-2") == "keep" and states(1, 2) == "none none")
+put(0, 6, "claw", 4, { quality = 0 }); fire("BAG_UPDATE_DELAYED"); ContainerFrameCombinedBags:UpdateItems()
+check("a gray item looted later is junk without being touched", btn(0, 6):state() == "sell" and kind("claw") == nil)
+
+SlashCmdList.JUNKMARK("mode manual")
+check("/jm mode manual: nothing is junk unless marked; the not-junk marks are kept but mean nothing", JunkMarkDB.mode == "manual" and btn(0, 6):state() == "none"
+  and kind("tooth") == "keep" and bgr.junk(0, 6) == false)
+press(0, 1)
+check("...so Space on such an item marks it junk as on any other", kind("tooth") == "junk" and btn(0, 1):state() == "sell")
+SlashCmdList.JUNKMARK("mode auto"); press(0, 1); local e1 = kind("tooth"); press(0, 1); local e2 = kind("tooth"); press(0, 1)
+check("a gray item marked by hand takes the same steps once junk is automatic", e1 == "favorite" and e2 == "keep" and kind("tooth") == nil and btn(0, 1):state() == "sell")
+
+-- Not-junk marks are pruned like favorites: only at the bank, only when the item is nowhere.
+bags[6], bags.equipped = {}, {}
+JunkMarkDB.marked.gone = { kind = "keep" }; JunkMarkDB.marked.stashed = { kind = "keep" }; put(6, 1, "stashed", 2, { quality = 0 })
+JunkMarkDB.marked.mailed = { kind = "keep" }; elsewhere.mailed = true -- no slot shows it, yet the game says the character holds it
+merchantOpen = true; fire("MERCHANT_SHOW"); merchantOpen = false; fire("MERCHANT_CLOSED")
+check("a vendor visit never drops a not-junk mark", kind("gone") == "keep" and kind("stashed") == "keep")
+-- The game's own answer is made to know nothing of bags or bank here, so that seeing
+-- the item in the bank and asking the game are each shown to matter by themselves.
+local realHeld = C_Item.IsItemGUIDInInventory; C_Item.IsItemGUIDInInventory = function(guid) return elsewhere[guid] == true end
+from = #out + 1; fire("BANKFRAME_OPENED"); nextFrame(); C_Item.IsItemGUIDInInventory = realHeld
+check("at the bank a not-junk mark whose item is nowhere is dropped, without a chat line", kind("gone") == nil and #out == from - 1)
+check("...one seen in the bank, one in the bags and one the game still reports holding are kept", kind("stashed") == "keep" and kind("fang-2") == "keep" and kind("mailed") == "keep")
+check("...and the trace counts them", JunkMarkDB.trace[#JunkMarkDB.trace]:find("prune: 4 not-junk marks, 1 dropped", 1, true))
+fire("BANKFRAME_CLOSED"); bags[6], bags.equipped = nil, nil; elsewhere.mailed = nil
+
+from = #out + 1; SlashCmdList.JUNKMARK("clear")
+check("/jm clear in automatic mode says the held-out items are junk again", marks() == 0 and btn(0, 2):state() == "sell" and out[from]:find("junk again", 1, true))
 if #caught > 0 then io.write("listener error: ", caught[1], "\n") end
 check("no listener raised an error", #caught == 0)
 end
