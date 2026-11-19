@@ -179,8 +179,10 @@ end
 --   login     - once, at PLAYER_LOGIN, when every enabled addon has loaded
 --   favorited - an item was just marked favorite (bag, slot, container item info)
 --   changed   - a mark was added, changed or removed (JunkMarkAPI.OnChanged)
+--   vendor    - a vendor window has just opened, before JunkMark does anything there
+--   bags      - the bags' contents changed (BAG_UPDATE_DELAYED)
 -- Each call is protected, so one listener's error cannot stop the others or JunkMark.
-local listeners = { login = {}, favorited = {}, changed = {} };
+local listeners = { login = {}, favorited = {}, changed = {}, vendor = {}, bags = {} };
 
 local function Fire(list, ...)
 	for _, func in ipairs(listeners[list]) do
@@ -2127,6 +2129,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 		Fire("login");
 	elseif event == "MERCHANT_SHOW" then
 		merchantOpen = true;
+		Fire("vendor");
 		-- The game's own button where the client has one, JunkMark's otherwise.
 		if not sellButton and not takenButton and not TakeOverGameSellButton() then
 			CreateSellButton();
@@ -2157,6 +2160,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 		bankOpen = false;
 	elseif event == "BAG_UPDATE_DELAYED" then
 		favoriteItemIDs = nil;
+		Fire("bags");
 		QueueForeignRefresh();
 		ApplyHoverKey();
 		UpdateSellButton();

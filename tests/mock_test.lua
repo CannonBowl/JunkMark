@@ -1038,4 +1038,73 @@ if #caught > 0 then io.write("listener error: ", caught[1], "\n") end
 check("no listener raised an error", #caught == 0)
 end
 
+--------------------------------------------------------------------------------
+-- EnhanceQoL: its exclusion list answers for favorites
+--
+-- The fake copies the one thing read in EnhanceQoL 13.23.0 that the guard rests on:
+-- each of its sellers and deleters looks the item ID up in
+-- EnhanceQoL.db.vendorExcludeSellList and leaves the item alone when that is set.
+--------------------------------------------------------------------------------
+do
+caught = {}
+Baganator, MerchantSellAllJunkButton = nil, nil
+C_MerchantFrame = { IsSellAllJunkEnabled = function() return false end }
+local list = { listed = "Listed Thing" }
+EnhanceQoL = { db = { vendorExcludeSellList = list, sellAllJunk = false } }
+loaded.EnhanceQoLVendor = true
+-- As in its lookupItems and sellItems: skipped when the list answers for the item ID.
+local function skips(itemID) local l = EnhanceQoL.db.vendorExcludeSellList; return (l and l[itemID]) and true or false end
+local function entries(t) local n = 0; for _ in pairs(t) do n = n + 1 end; return n end
+local function report() local from = #out + 1; SlashCmdList.JUNKMARK("check"); return table.concat(out, "\n", from) end
+bags[0], bags[1] = {}, {}; JunkMarkDB = nil; knowsDE = false; money = 0
+relog()
+-- bags: (0,1) and (0,2) are two gray teeth, the same item; (0,3) vase; (0,4) an item the player excluded in EnhanceQoL
+put(0, 1, "tooth-1", 7, { quality = 0, id = "tooth" }); put(0, 2, "tooth-2", 7, { quality = 0, id = "tooth" }); put(0, 3, "vase", 50); put(0, 4, "listed", 9)
+fire("BAG_UPDATE_DELAYED"); ContainerFrameCombinedBags:UpdateItems()
+
+local quiet = #out
+check("EnhanceQoL: with no favorites its exclusion list answers only for what the player put in it", skips("listed") and not skips("tooth") and not skips("vase"))
+press(0, 1, 2)
+check("a favorite's item ID reads as excluded there, for every copy of it, and no other item does", kind("tooth-1") == "favorite" and skips("tooth") and not skips("vase") and skips("listed"))
+check("nothing is put in the list: walking it, as its editor and the saved file do, finds only the player's entry",
+  entries(list) == 1 and rawget(list, "tooth") == nil and entries(roundTrip(list)) == 1 and list.listed == "Listed Thing")
+check("favoriting a gray item says nothing while EnhanceQoL's sell-all setting is off", #out == quiet)
+press(0, 1)
+check("unmarking lifts it", kind("tooth-1") == nil and not skips("tooth"))
+press(0, 1, 2); local carried = skips("tooth"); local held = bags[0][1]; bags[0][1] = nil; fire("BAG_UPDATE_DELAYED")
+check("a favorite that leaves the bags stops answering for its item ID", carried and not skips("tooth"))
+bags[0][1] = held; fire("BAG_UPDATE_DELAYED")
+
+-- EnhanceQoL swaps the list for another table, as a profile change does.
+EnhanceQoL.db.vendorExcludeSellList = {}; local bare = not skips("tooth"); fire("BAG_UPDATE_DELAYED")
+check("when EnhanceQoL swaps in another list, the guard is on it at the next bag change", bare and skips("tooth"))
+EnhanceQoL.db.vendorExcludeSellList = {}; bare = not skips("tooth"); merchantOpen = true; fire("MERCHANT_SHOW")
+check("...or as a vendor opens", bare and skips("tooth"))
+merchantOpen = false; fire("MERCHANT_CLOSED")
+EnhanceQoL.db.vendorExcludeSellList = {}; bare = not skips("tooth"); press(0, 3)
+check("...or when a mark changes", bare and kind("vase") == "junk" and skips("tooth"))
+check("/jm check says EnhanceQoL is guarded", report():find("EnhanceQoL's Vendor and Bags selling: guarded", 1, true))
+
+local theirs = { __index = function() return nil end }
+local locked = setmetatable({}, theirs); EnhanceQoL.db.vendorExcludeSellList = locked; fire("BAG_UPDATE_DELAYED")
+check("a list that already has a metatable is left as it is, and /jm check says EnhanceQoL is not guarded",
+  getmetatable(locked) == theirs and not skips("tooth") and report():find("EnhanceQoL|r is not guarded", 1, true))
+EnhanceQoL.db.vendorExcludeSellList = nil; fire("BAG_UPDATE_DELAYED")
+check("with no list there JunkMark makes none, and says the same", EnhanceQoL.db.vendorExcludeSellList == nil and report():find("EnhanceQoL|r is not guarded", 1, true))
+EnhanceQoL.db.vendorExcludeSellList = list
+
+-- Its "Automatically sell all junk items" runs the game's own sale, which no list stops.
+EnhanceQoL.db.sellAllJunk = true
+local from = #out + 1; press(0, 2, 2); local said = table.concat(out, "\n", from)
+check("EnhanceQoL's sell-all setting is warned about when a gray item is favorited", kind("tooth-2") == "favorite" and #out == from
+  and said:find("EnhanceQoL's \"Automatically sell all junk items\" sells every gray item", 1, true))
+check("...and /jm check names it beside the guard", report():find("Automatically sell all junk items\"|r sells every gray item", 1, true))
+loaded.EnhanceQoLVendor = nil
+check("...but not when its Vendor module is not loaded", not report():find("Automatically sell all junk items", 1, true))
+EnhanceQoL = nil; fire("BAG_UPDATE_DELAYED"); said = report()
+check("with no EnhanceQoL nothing is said about it", not said:find("EnhanceQoL", 1, true) and said:find("no other addon that sells junk was found", 1, true))
+if #caught > 0 then io.write("listener error: ", caught[1], "\n") end
+check("no listener raised an error", #caught == 0)
+end
+
 io.write(fails == 0 and "ALL PASSED\n" or (fails .. " FAILED\n")); os.exit(fails == 0 and 0 or 1)

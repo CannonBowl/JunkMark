@@ -112,7 +112,7 @@ The protection covers selling only:
 
 Other junk addons decide what is junk by item type, so they cannot tell a favorite from another copy of the same item. Run `/jm check` to see which of them JunkMark found on your character and what it did about each.
 
-> Added in 0.7.0 by reading each addon's code at the version named. None of it has been run in the game.
+> Added in 0.7.0 (EnhanceQoL in 0.10.0) by reading each addon's code at the version named. None of it has been run in the game.
 
 | Addon | Version read | What JunkMark does |
 | --- | --- | --- |
@@ -121,13 +121,16 @@ Other junk addons decide what is junk by item type, so they cannot tell a favori
 | SellJunk | Beast-Masters copy, 2026-11-08 | Guarded: by slot where that version allows, otherwise for every copy of a favorited item |
 | RestedXP inventory manager (auto-sell, delete when bags are full) | 4.11.36 | Guarded: it never treats a favorite as junk |
 | EllesmereUI junk marker (Sell Junk, and Auto Sell Junk while the Junk Icon is on) | 9.8.9 | Guarded: no copy of an item is junk to it while one copy in your bags is a favorite |
+| EnhanceQoL Vendor and Bags (selling by quality, by list and by category; the destroy queue; the loot-window delete button) | 13.23.0 | Guarded: no copy of an item is sold or deleted by it while one copy in your bags is a favorite |
 | Dejunk | 3.5.1 | Cannot be stopped; asked about each new favorite, and warns if it counts it as junk |
 | Vendor | 6.14.0 | Cannot be stopped; asked about each new favorite, and warns if it would sell it |
 | Peddler | Cartas's copy, 2026-11-09 | Cannot be stopped; warns about gray favorites |
 | EllesmereUI Auto Sell Junk with the Bags Junk Icon off | 9.8.9 | Cannot be stopped; warns about gray favorites |
 | Leatrix Plus "Sell junk automatically" | 1.60.32 | Cannot be stopped; warns about gray favorites |
+| EnhanceQoL "Automatically sell all junk items" | 13.23.0 | Cannot be stopped; warns about gray favorites |
 
 - A guard changes only what the other addon is told about favorites. Nothing is written to its settings, and JunkMark's junk marks are not passed to it.
+- EnhanceQoL keeps its selling private, but every part of it skips an item on its own exclusion list. JunkMark makes that list answer for a favorite's item without adding anything to it, so the list in EnhanceQoL's settings shows only what you put there. If `/jm check` says EnhanceQoL is not guarded, the list was not there to hold the guard.
 - Dejunk and Vendor keep their selling private, so JunkMark cannot stop them. It can ask them, so it tells you when a favorite needs adding to their own keep lists, and `/jm check` counts such favorites.
 - The gray sellers only take gray items, so only a gray favorite is at risk. JunkMark warns once per session, per seller, when you make a gray item a favorite while one is active.
 - EllesmereUI's Junk Items window can still list a gray favorite. It deletes only on your Ctrl-click.
@@ -139,6 +142,7 @@ JunkMark offers itself to Baganator as its source of what is junk, and Baganator
 
 - **One coin.** JunkMark draws its own mark in Baganator's window as it does everywhere. Baganator's own junk coin would say the same thing on the same items, so JunkMark hides it while it is Baganator's junk source. Nothing in Baganator's settings is changed for this.
 - You can pick another source with the Junk detection setting on the General tab of Baganator's settings. Baganator then leaves that choice alone, and its own coin shows again.
+- Another addon that offers a junk source and loads before JunkMark can be selected in its place the first time you log in with both; EnhanceQoL does this. `/jm check` says when Baganator follows another source. Pick JunkMark in that same setting once and Baganator keeps it.
 
 ## Keybindings
 

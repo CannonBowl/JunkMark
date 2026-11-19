@@ -8,7 +8,8 @@
 --     that function can be reached. JunkMark wraps it so it answers "no" for a
 --     favorite, and otherwise answers as before. Nothing is written to that addon's
 --     saved settings, and JunkMark's junk marks are not passed to it: JunkMark sells
---     its own junk.
+--     its own junk. EnhanceQoL has no such function, and is guarded through the
+--     exclusion list it reads instead, still without writing to it.
 --   * Asked. The addon cannot be stopped, but it will say whether it counts an item
 --     as junk. JunkMark asks about each new favorite and warns if the answer is yes.
 --   * Warned about. The addon sells every gray item through code that cannot be
@@ -152,6 +153,53 @@ local function GuardSellJunk()
 	end
 end
 
+-- EnhanceQoL, read at 13.23.0. Its Vendor module can sell by rules (a quality, an item
+-- level, a list of item IDs), delete from a destroy queue, and delete the cheapest gray
+-- stack from a button under the loot window; its Bags module can sell a whole
+-- category. All of that is in local functions, so there is nothing to wrap. What every
+-- one of them does do, both when it picks items and again just before it acts on each,
+-- is skip an item whose ID is in the player's exclusion list,
+-- EnhanceQoL.db.vendorExcludeSellList (EnhanceQoLVendor.lua: lookupItems, sellItems,
+-- the destroy button's click; AutoJunk.lua: GetCandidate; EnhanceQoLBags/BagsCore.lua).
+--
+-- So the guard is on that list: it is given a metatable whose lookup answers for an
+-- item ID that is not in the list but has a favorite copy in the bags. Nothing is put
+-- in the list, so nothing reaches EnhanceQoL's saved settings, its list editor shows
+-- only what the player added, and the answer stops when the favorite does. It works by
+-- item ID: no copy is sold or deleted while one copy is a favorite.
+--
+-- EnhanceQoL can replace the list with another table (a profile change or import), so
+-- the guard is put back whenever the bags change, a vendor opens or a mark changes. A
+-- list that already has a metatable is left alone and reported as not guarded.
+local ENHANCEQOL_ANSWER = "JunkMark favorite"; -- entries in that list are item names
+
+local enhanceQoLGuard = { __index = function(_, itemID)
+	if ns.IsItemIDFavorite(itemID) then
+		return ENHANCEQOL_ANSWER;
+	end
+	return nil;
+end };
+
+-- "guarded" when the guard is on EnhanceQoL's current list, "open" when EnhanceQoL is
+-- there and it is not, nil when there is no EnhanceQoL.
+local function GuardEnhanceQoL()
+	local settings = type(EnhanceQoL) == "table" and EnhanceQoL.db;
+	if type(settings) ~= "table" then
+		return nil;
+	end
+	local list = settings.vendorExcludeSellList;
+	if type(list) ~= "table" then
+		return "open";
+	end
+	local current = getmetatable(list);
+	if current == nil then
+		setmetatable(list, enhanceQoLGuard);
+	elseif current ~= enhanceQoLGuard then
+		return "open";
+	end
+	return "guarded";
+end
+
 --------------------------------------------------------------------------------
 -- Asked: addons that cannot be stopped but will say what they count as junk
 --------------------------------------------------------------------------------
@@ -215,6 +263,17 @@ local GRAY_SELLERS = {
 				and type(manager) == "table" and type(manager.IsJunkMarkerEnabled) == "function"
 				and manager:IsJunkMarkerEnabled();
 			return not throughMarker;
+		end,
+	},
+	{
+		-- Read at version 13.23.0. With this setting on it calls the game's own "sell
+		-- all junk" as a vendor opens (EnhanceQoLVendor.lua, MERCHANT_SHOW), which asks
+		-- no addon and so is out of reach of the guard above.
+		name = "EnhanceQoL's \"Automatically sell all junk items\"",
+		advice = "Turn that setting off in EnhanceQoL's Vendor options. Its selling by quality, which JunkMark guards, can sell gray items instead.",
+		IsActive = function()
+			local settings = type(EnhanceQoL) == "table" and EnhanceQoL.db;
+			return type(settings) == "table" and settings.sellAllJunk == true and IsAddOnLoaded("EnhanceQoLVendor");
 		end,
 	},
 	{
@@ -309,15 +368,19 @@ ns.On("login", function()
 	GuardScrap();
 	GuardBetterBags();
 	GuardSellJunk();
+	GuardEnhanceQoL();
 	OfferJunkToBaganator();
 end);
 
 ns.On("favorited", OnFavorited);
+ns.On("changed", GuardEnhanceQoL);
+ns.On("vendor", GuardEnhanceQoL);
+ns.On("bags", GuardEnhanceQoL);
 
 ns.checks[#ns.checks + 1] = function(lines)
 	if baganator then
 		if baganator.IsJunkPluginActive and not baganator.IsJunkPluginActive(BAGANATOR_ID) then
-			lines[#lines + 1] = "Baganator: its junk coin, search and junk category follow another junk source, not JunkMark. That is the Junk detection setting on the General tab of Baganator's settings.";
+			lines[#lines + 1] = "Baganator: its junk coin, search and junk category follow another junk source, not JunkMark. That is the Junk detection setting on the General tab of Baganator's settings. An addon that loads before JunkMark can take it at login (EnhanceQoL does, the first time); pick JunkMark there once and Baganator keeps it.";
 		else
 			lines[#lines + 1] = "Baganator: its junk category, search, sort and junk coin follow JunkMark, whichever way /jm mode is set. Baganator's own junk coin is hidden while that is so, since JunkMark's mark already says it.";
 		end
@@ -326,6 +389,15 @@ ns.checks[#ns.checks + 1] = function(lines)
 	local found = #guarded;
 	for _, line in ipairs(guarded) do
 		lines[#lines + 1] = line;
+	end
+	-- Asked afresh each time, since EnhanceQoL can swap its list during a session.
+	local enhanceQoL = GuardEnhanceQoL();
+	if enhanceQoL == "guarded" then
+		found = found + 1;
+		lines[#lines + 1] = "EnhanceQoL's Vendor and Bags selling: guarded. Its selling by rules and by category, its destroy queue and its loot-window delete button skip an item while a copy of it is a favorite.";
+	elseif enhanceQoL == "open" then
+		found = found + 1;
+		lines[#lines + 1] = "|cffff4040EnhanceQoL|r is not guarded: its exclusion list was not there to hold the guard, or was already held by something else. Its selling and deleting would not spare a favorite.";
 	end
 	for _, seller in ipairs(RULE_SELLERS) do
 		if seller.IsPresent() then
