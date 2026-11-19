@@ -407,6 +407,9 @@ end
 -- Where the mark icon sits on an item button: db.corner, changed with /jm corner.
 -- It is a setting because bag addons put things of their own in the corners; both
 -- Baganator and EllesmereUIBags write the item level top-left, where the icon used to be.
+-- The default is bottom left: the one corner neither the game nor those addons use on
+-- an ordinary item. (Bottom right, the default from 0.4.1 to 0.9.0, holds the stack
+-- count; Baganator puts an equipment-set icon bottom left, on gear in a set only.)
 local CORNERS = {
 	topleft = { "TOPLEFT", 2, -2 },
 	topright = { "TOPRIGHT", -2, -2 },
@@ -414,7 +417,7 @@ local CORNERS = {
 	bottomright = { "BOTTOMRIGHT", -2, 2 },
 };
 local CORNER_NAMES = "topleft, topright, bottomleft, bottomright";
-local DEFAULT_CORNER = "bottomright";
+local DEFAULT_CORNER = "bottomleft";
 
 local function AnchorMarkIcons(overlay)
 	local corner = CORNERS[db.corner] or CORNERS[DEFAULT_CORNER];
@@ -433,8 +436,8 @@ local function CreateOverlay(button)
 	overlay.shade:SetAllPoints(button);
 
 	-- The mark icons are in ARTWORK as well, above the shade. The stack count is text
-	-- in the same layer and text draws over textures, so with the icon in the count's
-	-- corner (bottom right) the number stays readable on top of it.
+	-- in the same layer and text draws over textures, so when the player moves the icon
+	-- to the count's corner (bottom right) the number stays readable on top of it.
 
 	-- Junk bound for a vendor: the coin the default UI shows on gray items.
 	overlay.coin = button:CreateTexture(nil, "ARTWORK", nil, 1);

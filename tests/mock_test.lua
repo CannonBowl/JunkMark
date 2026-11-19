@@ -502,7 +502,7 @@ closeVendor(); vendorTabs = {}
 
 -- Which corner the mark icon sits in. Textures are created in order: shade, coin, action, star.
 local function corner(b, i) local p = b.textures[i] and b.textures[i].point; return p and p[1] end
-check("mark icons sit in the bottom-right corner by default", corner(btn(0, 3), 2) == "BOTTOMRIGHT" and corner(btn(0, 3), 3) == "BOTTOMRIGHT" and corner(btn(0, 3), 4) == "BOTTOMRIGHT")
+check("mark icons sit in the bottom-left corner by default", corner(btn(0, 3), 2) == "BOTTOMLEFT" and corner(btn(0, 3), 3) == "BOTTOMLEFT" and corner(btn(0, 3), 4) == "BOTTOMLEFT")
 SlashCmdList.JUNKMARK("corner topright")
 check("'/jm corner' moves icons already drawn, and is saved", corner(btn(0, 3), 4) == "TOPRIGHT" and corner(btn(0, 3), 2) == "TOPRIGHT" and JunkMarkDB.corner == "topright")
 press(0, 1); check("...and a newly marked item uses it", btn(0, 1):state() == "sell" and corner(btn(0, 1), 2) == "TOPRIGHT"); press(0, 1, 2)
