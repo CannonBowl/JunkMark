@@ -73,7 +73,11 @@ In automatic mode Space on a gray item steps through favorite, then **not junk**
 
 ### Selling
 
-A **Sell Junk (N)** button hangs under the bottom-right corner of the vendor window, in the same row as its tabs. It narrows to fit beside a tab another addon adds, and only drops to a row of its own when there is no room at all. It sells every junk item bound for the vendor and reports the total.
+JunkMark sells from the game's own **Sell All Junk** button in the vendor window, where the client shows one. A click sells what JunkMark shows as junk and reports the total, in place of the game's own sale of every gray item. So the button never takes a favorite or a gray item you set to not junk, which the game's own sale would. The button is lit when there is something to sell, with the count on it, and there is no confirmation popup.
+
+On a client without that button, a **Sell Junk (N)** button hangs under the bottom-right corner of the vendor window instead, in the same row as its tabs. It narrows to fit beside a tab another addon adds, and only drops to a row of its own when there is no room at all.
+
+Either button sells every junk item bound for the vendor. Shift-click it to include items queued for a profession.
 
 - An item only counts as sold once it has left your bags. Anything the vendor did not take keeps its mark and is reported.
 - Items you can still return for a refund are never sold.
@@ -133,8 +137,8 @@ Other junk addons decide what is junk by item type, so they cannot tell a favori
 
 JunkMark offers itself to Baganator as its source of what is junk, and Baganator selects it unless you have picked a source there yourself. JunkMark's answer is exactly what JunkMark counts as junk: what you marked, plus gray items when junk is automatic, and never a favorite or an item set to not junk. Baganator's junk category, its `junk` search word, its sort order and its own junk coin then follow JunkMark, so there is one idea of junk in your bags.
 
-- **Two coins.** JunkMark draws its own mark in Baganator's window as it does everywhere, so a junk item there also carries Baganator's coin. For one coin, take the junk coin out of Icon Corners in Baganator's settings.
-- You can pick another source with the Junk detection setting on the General tab of Baganator's settings. Baganator then leaves that choice alone.
+- **One coin.** JunkMark draws its own mark in Baganator's window as it does everywhere. Baganator's own junk coin would say the same thing on the same items, so JunkMark hides it while it is Baganator's junk source. Nothing in Baganator's settings is changed for this.
+- You can pick another source with the Junk detection setting on the General tab of Baganator's settings. Baganator then leaves that choice alone, and its own coin shows again.
 
 ## Keybindings
 

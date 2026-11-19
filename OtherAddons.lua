@@ -14,8 +14,9 @@
 --   * Warned about. The addon sells every gray item through code that cannot be
 --     reached or asked. JunkMark says so when a gray item is made a favorite.
 --
--- The game's own Sell All Junk button is not in any of these lists. It can sell a
--- gray favorite too, and leaving that alone was decided on 2026-11-16.
+-- The game's own Sell All Junk button is not in any of these lists: since 0.9.0
+-- JunkMark.lua takes that button over, so a click runs JunkMark's sale. Addons that
+-- call the game's sell-all-junk function themselves are still only warned about.
 --
 -- Last in the file, JunkMark offers itself to Baganator as a source of what is junk.
 --
@@ -265,10 +266,12 @@ end
 -- choice is not a registered one, and its default is not.
 --
 -- JunkMark still draws its own marks in Baganator's window, the same way as in any
--- other bag addon, so a junk item there carries Baganator's coin as well. Which
--- corner icons Baganator draws is the player's setting in Baganator ("Icon Corners"),
--- not something a junk source can change; /jm check and the README say how to end up
--- with one coin.
+-- other bag addon. Baganator's own junk coin would then sit on the same items and say
+-- the same thing, so while JunkMark is the source that coin is made invisible
+-- (ns.HidesJunkCoin, used by JunkMark.lua): one coin for junk, JunkMark's. A junk
+-- source cannot ask Baganator not to draw the coin, which is the player's "Icon
+-- Corners" setting there, and JunkMark does not write to that setting. If the player
+-- picks another junk source in Baganator, its coin shows again.
 --------------------------------------------------------------------------------
 
 local BAGANATOR_ID = "junkmark";
@@ -286,6 +289,16 @@ local function OfferJunkToBaganator()
 	ns.On("changed", function()
 		api.RequestItemButtonsRefresh();
 	end);
+end
+
+-- Whether another addon's own junk coin on this item button only repeats JunkMark's
+-- verdict, and so should not be seen. True for a Baganator item button (they carry a
+-- BGR table, ItemViewCommon/ItemButton.lua) while JunkMark is Baganator's junk source.
+function ns.HidesJunkCoin(button)
+	if not baganator or type(button.BGR) ~= "table" then
+		return false;
+	end
+	return baganator.IsJunkPluginActive == nil or baganator.IsJunkPluginActive(BAGANATOR_ID) == true;
 end
 
 --------------------------------------------------------------------------------
@@ -306,7 +319,7 @@ ns.checks[#ns.checks + 1] = function(lines)
 		if baganator.IsJunkPluginActive and not baganator.IsJunkPluginActive(BAGANATOR_ID) then
 			lines[#lines + 1] = "Baganator: its junk coin, search and junk category follow another junk source, not JunkMark. That is the Junk detection setting on the General tab of Baganator's settings.";
 		else
-			lines[#lines + 1] = "Baganator: its junk category, search, sort and junk coin follow JunkMark, whichever way /jm mode is set. JunkMark draws its own mark too, so junk shows two coins there. For one coin, take the junk coin out of Icon Corners in Baganator's settings.";
+			lines[#lines + 1] = "Baganator: its junk category, search, sort and junk coin follow JunkMark, whichever way /jm mode is set. Baganator's own junk coin is hidden while that is so, since JunkMark's mark already says it.";
 		end
 	end
 

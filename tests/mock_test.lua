@@ -165,7 +165,10 @@ for bag = 0, 1 do for slot = 1, 8 do buttons[#buttons+1] = button(bag, slot) end
 local function btn(bag, slot) return buttons[bag * 8 + slot] end
 ContainerFrameCombinedBags = { IsShown = function() return true end, UpdateItems = function() end,
   EnumerateValidItems = function() return ipairs(buttons) end }
-hooksecurefunc = function(t, name, hook) local orig = t[name]; t[name] = function(...) orig(...); hook(...) end end
+hooksecurefunc = function(t, name, hook)
+  if type(t) == "string" then t, name, hook = _G, t, name end -- the two-argument form hooks a global function
+  local orig = t[name]; t[name] = function(...) orig(...); hook(...) end
+end
 local foci = {}
 GetMouseFoci = function() return foci end
 
@@ -955,6 +958,82 @@ fire("BANKFRAME_CLOSED"); bags[6], bags.equipped = nil, nil; elsewhere.mailed = 
 
 from = #out + 1; SlashCmdList.JUNKMARK("clear")
 check("/jm clear in automatic mode says the held-out items are junk again", marks() == 0 and btn(0, 2):state() == "sell" and out[from]:find("junk again", 1, true))
+if #caught > 0 then io.write("listener error: ", caught[1], "\n") end
+check("no listener raised an error", #caught == 0)
+end
+
+--------------------------------------------------------------------------------
+-- One coin in Baganator's window, and the game's own Sell All Junk button
+--
+-- Both fakes copy what was read in the real code: a Baganator item button carries a
+-- BGR table and the bag template's JunkIcon; the game's button has an Icon, and
+-- MerchantFrame_Update enables it by the game's own count of gray items.
+--------------------------------------------------------------------------------
+do
+caught = {}
+local bgr = { active = true }
+Baganator = { API = {
+  RegisterJunkPlugin = function() end, RequestItemButtonsRefresh = function() end,
+  IsJunkPluginActive = function() return bgr.active end,
+} }
+local grays, motion, countText = 0, nil, widget()
+MerchantSellAllJunkButton = widget(); MerchantSellAllJunkButton.Icon = widget()
+function MerchantSellAllJunkButton.Icon:SetDesaturated(v) self.gray = v end
+function MerchantSellAllJunkButton:SetMotionScriptsWhileDisabled(v) motion = v end
+function MerchantSellAllJunkButton:CreateFontString() return countText end
+MerchantFrame_Update = function() MerchantSellAllJunkButton.Icon:SetDesaturated(grays == 0); MerchantSellAllJunkButton:SetEnabled(grays > 0) end
+C_MerchantFrame = { IsSellAllJunkEnabled = function() return true end, SellAllJunkItems = function() error("the game's own sale ran") end }
+bags[0], bags[1] = {}, {}; JunkMarkDB = nil; knowsDE = false; money = 0
+relog()
+-- bags: (0,1) tooth and (0,4) rock are unmarked grays, (0,2) vase is marked junk, (0,3) charm is a gray favorite
+put(0, 1, "tooth", 7, { quality = 0 }); put(0, 2, "vase", 50); put(0, 3, "charm", 20, { quality = 0 }); put(0, 4, "rock", 5, { quality = 0 })
+fire("BAG_UPDATE_DELAYED"); ContainerFrameCombinedBags:UpdateItems()
+press(0, 2); press(0, 3, 2)
+
+local function coin(alpha) local c = { alpha = alpha or 1 }; function c:SetAlpha(a) self.alpha = a end; return c end
+local win = plain(UIParent); win.name = "TheirJunkCoinWindow"; local pane = plain(win)
+local G = {}; for slot = 1, 4 do G[slot] = theirButton(pane, 0, slot); G[slot].BGR = {}; G[slot].JunkIcon = coin() end
+local win2 = plain(UIParent); win2.name = "SomeOtherBags"; local O = theirButton(plain(win2), 0, 2); O.JunkIcon = coin(0.5) -- no BGR: not Baganator's
+foci = { G[1] }; ticks(1); foci = { O }; ticks(1); foci = {}; G[1]:run("OnLeave"); O:run("OnLeave")
+check("in Baganator's window, with JunkMark as its junk source, Baganator's own coin is invisible on every button and JunkMark's is drawn",
+  G[1].JunkIcon.alpha == 0 and G[2].JunkIcon.alpha == 0 and G[4].JunkIcon.alpha == 0 and G[2]:state() == "sell" and G[3]:state() == "favorite")
+check("another bag addon's coin is left exactly as that addon has it", O.JunkIcon.alpha == 0.5 and O:state() == "sell")
+bgr.active = false; G[2].icon:SetTexture("icon"); G[3].icon:SetTexture("icon")
+check("when the player picks another junk source in Baganator, its coin shows again as each button repaints", G[2].JunkIcon.alpha == 1 and G[3].JunkIcon.alpha == 1 and G[1].JunkIcon.alpha == 0)
+bgr.active = true; G[2].icon:SetTexture("icon")
+check("...and goes again when JunkMark is picked", G[2].JunkIcon.alpha == 0)
+G[4].JunkIcon = nil; G[4].icon:SetTexture("icon")
+check("a Baganator button with no coin of its own is drawn as usual", G[4]:state() == "none" and #caught == 0)
+
+grays = 2; merchantOpen = true; fire("MERCHANT_SHOW")
+check("where the game shows its own Sell All Junk button, JunkMark adds none and takes that one over", JunkMarkSellButton == nil and motion == true
+  and type(MerchantSellAllJunkButton.scripts.OnClick) == "function" and type(MerchantSellAllJunkButton.scripts.OnEnter) == "function")
+grays = 0; MerchantFrame_Update()
+check("it is lit by what JunkMark would sell, with the count on it, after the game has set it by its own count of grays",
+  MerchantSellAllJunkButton.enabled == true and MerchantSellAllJunkButton.Icon.gray == false and countText.text == "1")
+local tip = {}; function GameTooltip:AddLine(text) tip[#tip + 1] = text end
+MerchantSellAllJunkButton.scripts.OnEnter(MerchantSellAllJunkButton); local said = table.concat(tip, "\n")
+check("its tooltip is JunkMark's, and says whose sale the button now runs", said:find("Sell marked junk", 1, true) and said:find("1 item worth 50c", 1, true) and said:find("JunkMark sells from this button", 1, true))
+local before = money; MerchantSellAllJunkButton.scripts.OnClick(MerchantSellAllJunkButton, "LeftButton"); pump(8)
+check("a click runs JunkMark's sale: the marked item, not the unmarked grays, not the gray favorite", money - before == 50 and bags[0][2] == nil
+  and bags[0][1] ~= nil and bags[0][3] ~= nil and bags[0][4] ~= nil)
+grays = 3; MerchantFrame_Update()
+check("with nothing JunkMark would sell the button is gray, though the game counts gray items", MerchantSellAllJunkButton.enabled == false
+  and MerchantSellAllJunkButton.Icon.gray == true and countText.text == "")
+SlashCmdList.JUNKMARK("mode auto"); grays = 0; MerchantFrame_Update()
+check("with junk automatic the same button counts the gray items, but not the favorite", MerchantSellAllJunkButton.enabled == true and countText.text == "2")
+before = money; MerchantSellAllJunkButton.scripts.OnClick(MerchantSellAllJunkButton, "LeftButton"); pump(8)
+check("...and sells them, keeping the gray favorite the game's own sale would have taken", money - before == 12 and bags[0][3] ~= nil and bags[0][1] == nil and bags[0][4] == nil)
+local from = #out + 1; SlashCmdList.JUNKMARK("check"); said = table.concat(out, "\n", from)
+check("/jm check says the game's button runs JunkMark's sale, and that Baganator's coin is hidden", said:find("Sell All Junk button runs JunkMark's sale", 1, true) and said:find("own junk coin is hidden", 1, true))
+merchantOpen = false; fire("MERCHANT_CLOSED")
+
+MerchantSellAllJunkButton = nil; relog(); merchantOpen = true; fire("MERCHANT_SHOW")
+check("a client with no Sell All Junk button gets JunkMark's own button, as before", JunkMarkSellButton ~= nil and JunkMarkSellButton.text == "Sell Junk (0)")
+merchantOpen = false; fire("MERCHANT_CLOSED")
+C_MerchantFrame.IsSellAllJunkEnabled = function() return false end; MerchantSellAllJunkButton = widget(); relog(); merchantOpen = true; fire("MERCHANT_SHOW")
+check("...and so does one where the game has that button switched off, which is then not touched", JunkMarkSellButton ~= nil and MerchantSellAllJunkButton.scripts.OnClick == nil)
+merchantOpen = false; fire("MERCHANT_CLOSED"); MerchantSellAllJunkButton, MerchantFrame_Update = nil, nil
 if #caught > 0 then io.write("listener error: ", caught[1], "\n") end
 check("no listener raised an error", #caught == 0)
 end

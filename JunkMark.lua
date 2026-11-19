@@ -641,8 +641,32 @@ local function GetForeignGUID(button)
 	return GetSlotGUID(button:GetBagID(), button:GetID()) or false;
 end
 
+-- Another bag addon may draw a junk coin of its own on its buttons (the JunkIcon the
+-- game's bag button template comes with). Where that coin only repeats JunkMark's
+-- verdict, it is made invisible, so junk carries one coin: JunkMark's. OtherAddons.lua
+-- says when that is so (ns.HidesJunkCoin); today that is Baganator while JunkMark is
+-- its junk source. Alpha is used, not Hide: the other addon shows and hides its coin
+-- as it likes and never touches its alpha, so nothing has to be hooked or re-done
+-- after it. Only an alpha JunkMark set is ever put back.
+local hiddenCoins = setmetatable({}, { __mode = "k" }); -- item button -> true while its coin is hidden
+
+local function UpdateTheirJunkCoin(button)
+	local coin = button.JunkIcon;
+	if type(coin) ~= "table" or type(coin.SetAlpha) ~= "function" then
+		return;
+	end
+	if ns.HidesJunkCoin ~= nil and ns.HidesJunkCoin(button) then
+		coin:SetAlpha(0);
+		hiddenCoins[button] = true;
+	elseif hiddenCoins[button] then
+		coin:SetAlpha(1);
+		hiddenCoins[button] = nil;
+	end
+end
+
 local function DrawForeignButton(button)
 	foreignButtons[button] = GetForeignGUID(button);
+	UpdateTheirJunkCoin(button);
 	if ShowsAnotherCharacter(button) then
 		HideButtonOverlay(button);
 	else
@@ -1269,14 +1293,38 @@ local function SellJunk(includeHeld)
 	SellTick();
 end
 
+-- The game's own Sell All Junk button, once JunkMark has taken it over (see
+-- TakeOverGameSellButton), with the count drawn on it and whether it can be used.
+local takenButton, takenCount, takenUsable;
+
+-- Puts the taken-over button in the state last worked out. The game sets that
+-- button's enabled state itself each time it redraws the vendor window, from its own
+-- count of gray items, so this runs again after it.
+local function ApplyTakenState()
+	if not takenButton then
+		return;
+	end
+	if type(takenButton.Icon) == "table" then
+		takenButton.Icon:SetDesaturated(not takenUsable);
+	end
+	takenButton:SetEnabled(takenUsable == true);
+end
+
 function UpdateSellButton()
-	if not sellButton or not merchantOpen then
+	if not merchantOpen or not (sellButton or takenButton) then
 		return;
 	end
 	local queue, _, heldCount = CollectJunk(false);
-	sellButton:SetText(string.format("Sell Junk (%d)", #queue));
 	-- Stays clickable with only held items, so Shift-click can still sell those.
-	sellButton:SetEnabled((#queue > 0 or heldCount > 0) and not sellRun);
+	local usable = (#queue > 0 or heldCount > 0) and not sellRun;
+	if takenButton then
+		takenUsable = usable;
+		takenCount:SetText(#queue > 0 and tostring(#queue) or "");
+		ApplyTakenState();
+	else
+		sellButton:SetText(string.format("Sell Junk (%d)", #queue));
+		sellButton:SetEnabled(usable);
+	end
 end
 
 local SELL_BUTTON_WIDTH = 140;
@@ -1320,28 +1368,73 @@ local function PlaceSellButton()
 	end
 end
 
+local function OnSellButtonClick()
+	SellJunk(IsShiftKeyDown());
+end
+
+-- The tooltip of whichever button sells junk: JunkMark's own, or the game's.
+local function ShowSellTooltip(self)
+	local queue, totalValue, heldCount = CollectJunk(false);
+	GameTooltip:SetOwner(self, "ANCHOR_RIGHT");
+	GameTooltip:AddLine("Sell marked junk");
+	if #queue > 0 then
+		GameTooltip:AddLine(string.format("%d item%s worth %s", #queue, Plural(#queue), FormatMoney(totalValue)), 1, 1, 1);
+	elseif heldCount == 0 then
+		if db.mode == MODE_AUTO then
+			GameTooltip:AddLine("There is no junk in your bags.", 1, 1, 1, true);
+		else
+			GameTooltip:AddLine(string.format("Hover a bag item and press %s to mark it as junk.", HOVER_KEY_NAME), 1, 1, 1, true);
+		end
+	end
+	if heldCount > 0 then
+		GameTooltip:AddLine(string.format("%d item%s kept for your professions. Shift-click to sell those too.", heldCount, Plural(heldCount)), 0.7, 0.5, 1, true);
+	end
+	if self == takenButton then
+		GameTooltip:AddLine("JunkMark sells from this button: what it shows as junk, and never a favorite.", 0.6, 0.6, 0.6, true);
+	end
+	GameTooltip:Show();
+end
+
 local function CreateSellButton()
 	sellButton = CreateFrame("Button", "JunkMarkSellButton", MerchantFrame, "UIPanelButtonTemplate");
 	sellButton:SetSize(SELL_BUTTON_WIDTH, 24);
 	sellButton:SetPoint("TOPRIGHT", MerchantFrame, "BOTTOMRIGHT", -SELL_BUTTON_MARGIN, -2);
-	sellButton:SetScript("OnClick", function()
-		SellJunk(IsShiftKeyDown());
-	end);
-	sellButton:SetScript("OnEnter", function(self)
-		local queue, totalValue, heldCount = CollectJunk(false);
-		GameTooltip:SetOwner(self, "ANCHOR_RIGHT");
-		GameTooltip:AddLine("Sell marked junk");
-		if #queue > 0 then
-			GameTooltip:AddLine(string.format("%d item%s worth %s", #queue, Plural(#queue), FormatMoney(totalValue)), 1, 1, 1);
-		elseif heldCount == 0 then
-			GameTooltip:AddLine(string.format("Hover a bag item and press %s to mark it as junk.", HOVER_KEY_NAME), 1, 1, 1, true);
-		end
-		if heldCount > 0 then
-			GameTooltip:AddLine(string.format("%d item%s kept for your professions. Shift-click to sell those too.", heldCount, Plural(heldCount)), 0.7, 0.5, 1, true);
-		end
-		GameTooltip:Show();
-	end);
+	sellButton:SetScript("OnClick", OnSellButtonClick);
+	sellButton:SetScript("OnEnter", ShowSellTooltip);
 	sellButton:SetScript("OnLeave", GameTooltip_Hide);
+end
+
+-- Where the client shows its own Sell All Junk button in the vendor window
+-- (MerchantSellAllJunkButton, shown when C_MerchantFrame.IsSellAllJunkEnabled();
+-- Blizzard_UIPanels_Game/Mainline/MerchantFrame.lua and .xml, forever branch),
+-- JunkMark uses that button instead of adding one. Left alone, it calls
+-- C_MerchantFrame.SellAllJunkItems(), which sells every gray item and knows nothing
+-- of JunkMark's marks: it would sell a gray favorite, and a gray item set to not
+-- junk. Taken over, a click runs JunkMark's own sale, so one button sells exactly
+-- what JunkMark shows as junk. The game's confirmation popup goes with it; JunkMark's
+-- sale never had one, and the vendor's buyback tab is the way back.
+--
+-- Returns whether there was such a button to take.
+local function TakeOverGameSellButton()
+	local button = MerchantSellAllJunkButton;
+	if type(button) ~= "table" or type(button.SetScript) ~= "function" or type(button.IsForbidden) ~= "function" or button:IsForbidden() then
+		return false;
+	end
+	if not (C_MerchantFrame and C_MerchantFrame.IsSellAllJunkEnabled and C_MerchantFrame.IsSellAllJunkEnabled()) then
+		return false;
+	end
+	takenButton = button;
+	button:SetScript("OnClick", OnSellButtonClick);
+	button:SetScript("OnEnter", ShowSellTooltip);
+	button:SetScript("OnLeave", GameTooltip_Hide);
+	-- So the tooltip can say why the button is gray.
+	button:SetMotionScriptsWhileDisabled(true);
+	takenCount = button:CreateFontString(nil, "OVERLAY", "NumberFontNormal");
+	takenCount:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -2, 2);
+	if type(MerchantFrame_Update) == "function" then
+		hooksecurefunc("MerchantFrame_Update", ApplyTakenState);
+	end
+	return true;
 end
 
 --------------------------------------------------------------------------------
@@ -1741,6 +1834,9 @@ local function PrintCheck()
 	else
 		lines[#lines + 1] = "Bag addons: none seen yet. Another bag addon is picked up the first time you hover an item in its window.";
 	end
+	if takenButton then
+		lines[#lines + 1] = "Vendors: the game's own Sell All Junk button runs JunkMark's sale, so it sells what JunkMark shows as junk and never a favorite.";
+	end
 	for _, addLines in ipairs(ns.checks) do
 		addLines(lines);
 	end
@@ -2028,7 +2124,8 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 		Fire("login");
 	elseif event == "MERCHANT_SHOW" then
 		merchantOpen = true;
-		if not sellButton then
+		-- The game's own button where the client has one, JunkMark's otherwise.
+		if not sellButton and not takenButton and not TakeOverGameSellButton() then
 			CreateSellButton();
 		end
 		-- Now, and again a frame later: an addon may add its tab while handling this
