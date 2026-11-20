@@ -1,0 +1,6 @@
+# Left out of `git archive`, which builds the release zip:
+#   git archive --prefix=JunkMark/ -o JunkMark-<version>.zip v<version>
+tests export-ignore
+media export-ignore
+.gitignore export-ignore
+.gitattributes export-ignore
