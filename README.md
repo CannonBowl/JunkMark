@@ -2,8 +2,6 @@
 
 JunkMark is an addon for World of Warcraft: Forever that marks bag items the way Diablo 4 does: hover an item and press Space to mark it as junk, press again to make it a favorite. Junk is sold or disenchanted in bulk, and favorites cannot be sold.
 
-> **Status: untested in the game.** JunkMark has only been run against a hand-written fake of the WoW API (see [Development](#development)). Expect rough edges on first load.
-
 ## Features
 
 - Mark any bag item with one key while hovering it: junk, favorite, or none
@@ -14,19 +12,23 @@ JunkMark is an addon for World of Warcraft: Forever that marks bag items the way
 - Overlay icons in your bags show what each marked item is and where it is headed
 - Refundable items are never sold, and a sale only counts once the item has left your bags
 - Marks follow items when bags are sorted, and are saved per character
-- Keeps favorites out of the junk selling of Scrap, BetterBags, SellJunk, EllesmereUI and RestedXP, and warns about sellers it cannot stop
+- Keeps favorites out of the junk selling of Scrap, BetterBags, SellJunk, EllesmereUI, RestedXP and EnhanceQoL, and warns about sellers it cannot stop
 
 ## Getting Started
 
-Copy or clone this folder into the Forever client's AddOns directory. The folder must be named `JunkMark`:
+JunkMark is for World of Warcraft: Forever (Interface `16001`, client 1.60.1).
+
+**With the CurseForge app:** pick your World of Warcraft: Forever installation, search for JunkMark, and click Install. The app keeps it updated.
+
+**By hand:** download the zip from JunkMark's CurseForge page and extract it into the Forever client's AddOns folder. The zip holds one `JunkMark` folder, which must end up here, under that name:
 
 ```
 World of Warcraft/_forever_/Interface/AddOns/JunkMark/
 ```
 
-Restart the game, or `/reload` if you are already logged in, and check that JunkMark appears in the AddOns list on the character screen. JunkMark targets Interface `16001` (Forever 1.60.1).
+Then exit the game completely and start it again: a newly installed addon is not picked up by `/reload`. Check that JunkMark is listed and enabled in the AddOns list on the character screen.
 
-Then open your bags, hover an item, and press **Space**. Nothing is sold or disenchanted until you click for it.
+Open your bags, hover an item, and press **Space**. Nothing is sold or disenchanted until you click for it.
 
 ## Marking Items
 
@@ -104,7 +106,7 @@ While a vendor window is open, a favorite cannot be right-clicked or dragged; tr
 The protection covers selling only:
 
 - A favorite can still be disenchanted by hand, deleted, or traded.
-- If the client's built-in "sell all gray items" vendor button is enabled, it could still sell a gray-quality favorite. JunkMark leaves that button alone.
+- The vendor window's **Sell All Junk** button sells for JunkMark (see [Selling](#selling)), so it never takes a favorite. An addon that calls the game's own sale of every gray item directly can still sell a gray favorite; the known ones are in the table below.
 - Another addon that sells junk may not know about favorites. See below.
 - `/jm clear` removes favorites along with junk marks.
 
@@ -211,7 +213,7 @@ Two bindings are listed under Options > Keybindings > AddOns:
 
 `JunkMark.lua` holds the addon itself. `OtherAddons.lua` holds the guards and warnings for other junk sellers and the Baganator junk source. `Bindings.xml` declares the two key bindings, and `JunkMark.toc` is the manifest.
 
-Run the logic tests from the addon folder:
+The source, tests included, is on GitHub at <https://github.com/CannonBowl/JunkMark>; the CurseForge download leaves the tests out. Run the logic tests from a clone:
 
 ```bash
 lua tests/mock_test.lua
@@ -239,8 +241,19 @@ Blizzard's own interface code for this client is mirrored in the `forever` branc
 
 ## Feedback & Issues
 
-To report a bug or suggest a change, please open an issue on GitHub:
-<https://github.com/CannonBowl/JunkMark/issues>
+To report a bug or suggest a change, open an issue on GitHub, <https://github.com/CannonBowl/JunkMark/issues>, or leave a comment on JunkMark's CurseForge page.
+
+A bug report is most useful with JunkMark's saved data attached:
+
+1. Run `/jm debug` on the character that has the problem, then `/reload` (or log out) so the game writes it to disk.
+2. Attach this file, for that character:
+
+   ```
+   World of Warcraft/_forever_/WTF/Account/<account>/<realm>/<character>/SavedVariables/JunkMark.lua
+   ```
+
+It holds your marks, what the game reported about each junk-marked item, and a short trace of recent clicks, key presses and sales. It holds no account or character names, but the folder names in its path do, so attach the file rather than a screenshot of the folder.
+Also say which bag addon and which other junk addons you use, or paste what `/jm check` prints.
 
 ## Legal
 
