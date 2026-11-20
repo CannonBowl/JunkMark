@@ -1,26 +1,35 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#3a2f5c"/>
-      <stop offset="1" stop-color="#15121f"/>
-    </linearGradient>
-    <radialGradient id="coin" cx="0.38" cy="0.32" r="0.8">
-      <stop offset="0" stop-color="#ffe9a3"/>
-      <stop offset="0.55" stop-color="#f0b63a"/>
-      <stop offset="1" stop-color="#b9791a"/>
-    </radialGradient>
-    <linearGradient id="star" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#ffe9a3"/>
-    </linearGradient>
-  </defs>
-  <rect width="400" height="400" rx="76" fill="url(#bg)"/>
-  <!-- the coin: junk bound for the vendor -->
-  <circle cx="172" cy="232" r="122" fill="#7a4d0c"/>
-  <circle cx="172" cy="224" r="122" fill="url(#coin)"/>
-  <circle cx="172" cy="224" r="92" fill="none" stroke="#a86c12" stroke-width="7" opacity="0.55"/>
-  <path d="M 118 232 L 158 270 L 232 184" fill="none" stroke="#7a4d0c" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>
-  <!-- the star: a favorite -->
-  <polygon points="288.0,30.0 311.5,89.6 375.5,93.6 326.0,134.4 342.1,196.4 288.0,162.0 233.9,196.4 250.0,134.4 200.5,93.6 264.5,89.6" fill="#15121f"/>
-  <polygon points="288.0,50.0 305.6,97.7 356.5,99.8 316.5,131.3 330.3,180.2 288.0,152.0 245.7,180.2 259.5,131.3 219.5,99.8 270.4,97.7" fill="url(#star)"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400" shape-rendering="crispEdges">
+  <rect width="400" height="400" fill="#16141c"/>
+  <g fill="#f0b63a">
+    <rect x="95" y="95" width="30" height="30"/>
+    <rect x="125" y="95" width="30" height="30"/>
+    <rect x="155" y="95" width="30" height="30"/>
+    <rect x="215" y="95" width="30" height="30"/>
+    <rect x="335" y="95" width="30" height="30"/>
+    <rect x="155" y="125" width="30" height="30"/>
+    <rect x="215" y="125" width="30" height="30"/>
+    <rect x="245" y="125" width="30" height="30"/>
+    <rect x="305" y="125" width="30" height="30"/>
+    <rect x="335" y="125" width="30" height="30"/>
+    <rect x="155" y="155" width="30" height="30"/>
+    <rect x="215" y="155" width="30" height="30"/>
+    <rect x="275" y="155" width="30" height="30"/>
+    <rect x="335" y="155" width="30" height="30"/>
+    <rect x="155" y="185" width="30" height="30"/>
+    <rect x="215" y="185" width="30" height="30"/>
+    <rect x="275" y="185" width="30" height="30"/>
+    <rect x="335" y="185" width="30" height="30"/>
+    <rect x="155" y="215" width="30" height="30"/>
+    <rect x="215" y="215" width="30" height="30"/>
+    <rect x="335" y="215" width="30" height="30"/>
+    <rect x="35" y="245" width="30" height="30"/>
+    <rect x="155" y="245" width="30" height="30"/>
+    <rect x="215" y="245" width="30" height="30"/>
+    <rect x="335" y="245" width="30" height="30"/>
+    <rect x="65" y="275" width="30" height="30"/>
+    <rect x="95" y="275" width="30" height="30"/>
+    <rect x="125" y="275" width="30" height="30"/>
+    <rect x="215" y="275" width="30" height="30"/>
+    <rect x="335" y="275" width="30" height="30"/>
+  </g>
 </svg>
