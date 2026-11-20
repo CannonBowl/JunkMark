@@ -21,7 +21,7 @@ First public release, for World of Warcraft: Forever (Interface 16001).
 ### Favorites
 
 - A favorite cannot be sold by hand while a vendor is open.
-- Favorites are kept out of the junk selling of Scrap, BetterBags, SellJunk, RestedXP, EllesmereUI and EnhanceQoL. JunkMark warns in chat about sellers it cannot stop, such as Leatrix Plus, Peddler, Dejunk and Vendor.
+- Favorites are kept out of the junk selling of Scrap, BetterBags, SellJunk, RestedXP and EllesmereUI, and out of EnhanceQoL's selling by rules and its deleting. JunkMark warns in chat about sellers it cannot stop, such as Leatrix Plus, Peddler, Dejunk, Vendor and EnhanceQoL's "Automatically sell all junk items".
 
 ### Commands
 
