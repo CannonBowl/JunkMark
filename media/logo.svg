@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400" shape-rendering="crispEdges">
+  <rect width="400" height="400" fill="#16141c"/>
+  <g fill="#f0b63a">
+    <rect x="95" y="95" width="30" height="30"/>
+    <rect x="125" y="95" width="30" height="30"/>
+    <rect x="155" y="95" width="30" height="30"/>
+    <rect x="215" y="95" width="30" height="30"/>
+    <rect x="335" y="95" width="30" height="30"/>
+    <rect x="155" y="125" width="30" height="30"/>
+    <rect x="215" y="125" width="30" height="30"/>
+    <rect x="245" y="125" width="30" height="30"/>
+    <rect x="305" y="125" width="30" height="30"/>
+    <rect x="335" y="125" width="30" height="30"/>
+    <rect x="155" y="155" width="30" height="30"/>
+    <rect x="215" y="155" width="30" height="30"/>
+    <rect x="275" y="155" width="30" height="30"/>
+    <rect x="335" y="155" width="30" height="30"/>
+    <rect x="155" y="185" width="30" height="30"/>
+    <rect x="215" y="185" width="30" height="30"/>
+    <rect x="275" y="185" width="30" height="30"/>
+    <rect x="335" y="185" width="30" height="30"/>
+    <rect x="155" y="215" width="30" height="30"/>
+    <rect x="215" y="215" width="30" height="30"/>
+    <rect x="335" y="215" width="30" height="30"/>
+    <rect x="35" y="245" width="30" height="30"/>
+    <rect x="155" y="245" width="30" height="30"/>
+    <rect x="215" y="245" width="30" height="30"/>
+    <rect x="335" y="245" width="30" height="30"/>
+    <rect x="65" y="275" width="30" height="30"/>
+    <rect x="95" y="275" width="30" height="30"/>
+    <rect x="125" y="275" width="30" height="30"/>
+    <rect x="215" y="275" width="30" height="30"/>
+    <rect x="335" y="275" width="30" height="30"/>
+  </g>
+</svg>
